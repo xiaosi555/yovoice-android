@@ -191,7 +191,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     private fun infoRow(title: String, detail: String) = TextView(this).apply {
         text = "$title\n$detail"; textSize = 14f; setTextColor(p.text); setLineSpacing(dp(3).toFloat(), 1f)
         setPadding(dp(14), dp(13), dp(14), dp(13)); background = shape(p.surface, dp(14), p.border, dp(1))
-    }.also { body.addView(it, marginTop(9)) }
+    }
     private fun toolRow(title: String, detail: String, action: () -> Unit) = LinearLayout(this).apply {
         orientation = LinearLayout.VERTICAL; setPadding(dp(16), dp(16), dp(16), dp(16))
         background = shape(p.surface, dp(16), p.border, dp(1)); setOnClickListener { action() }
