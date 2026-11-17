@@ -59,7 +59,7 @@ class ModelDownloadWorker(
         val stat = StatFs(modelsRoot.absolutePath)
         val required = total + 64L * 1024L * 1024L
         if (stat.availableBytes < required) {
-            throw IOException("手机可用空间不足，需要至少 ${ModelEntry.formatBytes(required)}")
+            throw IllegalStateException("手机可用空间不足，需要至少 ${ModelEntry.formatBytes(required)}")
         }
 
         val staging = File(modelsRoot, ".${model.id}.staging")
@@ -142,7 +142,7 @@ class ModelDownloadWorker(
         }
         try {
             val code = connection.responseCode
-            if (code == HttpURLConnection.HTTP_REQUESTED_RANGE_NOT_SATISFIABLE && offset == expectedSize) {
+            if (code == 416 && offset == expectedSize) {
                 return
             }
             if (code !in 200..299) throw IOException("下载服务器返回 HTTP $code")
