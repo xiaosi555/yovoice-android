@@ -44,7 +44,7 @@ jobs:
 
       - name: Verify Android ELF and C ABI exports
         run: |
-          LIB="build/audio-android-arm64/_deps/audio_cpp-build/bin/libaudiocpp.so"
+          LIB="build/audio-android-arm64/bin/libaudiocpp.so"
           test -s "$LIB"
           file "$LIB"
           "${ANDROID_HOME}/ndk/27.2.12479018/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-readelf" -h "$LIB" | grep -E "Class:|Machine:"
@@ -55,7 +55,7 @@ jobs:
         with:
           name: yovoice-audio-cpp-android-arm64
           path: |
-            build/audio-android-arm64/_deps/audio_cpp-build/bin/libaudiocpp.so
+            build/audio-android-arm64/bin/libaudiocpp.so
             build/audio-android-arm64/_deps/audio_cpp-src/include/audiocpp.h
           if-no-files-found: error
           retention-days: 14
