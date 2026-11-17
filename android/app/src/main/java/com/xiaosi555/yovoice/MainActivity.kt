@@ -64,7 +64,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         nav = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             setPadding(dp(8), dp(8), dp(8), dp(8))
-            background = shape(p.surface, 0, 0, p.border, dp(1))
+            background = shape(p.surface, 0, p.border, dp(1))
         }
         root.addView(nav, LinearLayout.LayoutParams(-1, dp(68)))
         setContentView(root)
