@@ -5,6 +5,14 @@
 ## [Unreleased]
 
 ### 简体中文
+- Android 模型中心接入上游完整模型目录（68 个条目），增加后台模型下载、断点续传、多文件 SHA-256 校验和原子安装。
+- 新增 audio.cpp Android ARM64 NDK/CMake 原生运行时构建验证；尚未完成 JNI 集成与端到端模型推理。
+
+### English
+- Add the upstream 68-entry model catalog to the Android model center, with background downloads, resumable transfers, per-file SHA-256 verification and atomic package installation.
+- Add an Android ARM64 NDK/CMake build validation for audio.cpp; JNI integration and end-to-end inference are still pending.
+
+### 简体中文
 - 修复 Android 原型中系统 TTS 初始化与界面状态控件之间的时序风险，并为音频播放和 Activity 生命周期增加异常保护。
 - 暂停 Android APK 自动打包；改为手动验证门禁，待 Android 原生推理运行时、模型下载/校验/加载和端到端真机测试完成后再构建交付。
 - 明确 Android 模型中心需复用原版模型目录、版本和 SHA-256 校验；模型权重按需下载到手机，不打包进 APK。
