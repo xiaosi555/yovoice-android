@@ -105,6 +105,13 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         }, matchWrap())
         content.addView(audioPanel, matchWrapWithTop(12))
 
+        content.addView(Button(this).apply {
+            text = "模型中心 · 下载语音与音频模型"
+            setOnClickListener {
+                startActivity(Intent(this@MainActivity, ModelCenterActivity::class.java))
+            }
+        }, matchWrapWithTop(14))
+
         status = TextView(this).apply {
             text = "正在准备语音服务…"
             textSize = 13f
@@ -114,7 +121,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         content.addView(status, matchWrap())
 
         content.addView(TextView(this).apply {
-            text = "当前为 Android 迁移开发版。离线模型、声音克隆、ASR、音乐与音轨引擎尚未接入，不代表完整桌面功能。"
+            text = "模型中心已接入上游模型目录与本地下载校验。Android 推理引擎仍在适配，模型下载完成后暂不能视为已可推理。"
             textSize = 12f
             setTextColor(0xFF818A96.toInt())
             setPadding(2, dp(12), 2, 0)
