@@ -1,6 +1,8 @@
 package com.xiaosi555.yovoice
 
 import android.os.Bundle
+import android.content.res.ColorStateList
+import android.graphics.drawable.GradientDrawable
 import android.view.Gravity
 import android.view.ViewGroup
 import android.widget.ArrayAdapter
@@ -25,6 +27,12 @@ class ModelCenterActivity : ComponentActivity() {
     private lateinit var workManager: WorkManager
     private lateinit var sourcePicker: Spinner
     private val downloadStates = mutableMapOf<String, WorkInfo.State?>()
+    private val themeIndex by lazy { getSharedPreferences("yovoice-ui", MODE_PRIVATE).getInt("theme", 0).coerceIn(0, 5) }
+    private val pageBg get() = intArrayOf(0xFFF7F7F7.toInt(),0xFF0F0F11.toInt(),0xFFF1F6F6.toInt(),0xFFF3EEE4.toInt(),0xFFEFF3ED.toInt(),0xFF04181A.toInt())[themeIndex]
+    private val surface get() = intArrayOf(0xFFFFFFFF.toInt(),0xFF18181B.toInt(),0xFFFFFFFF.toInt(),0xFFFBF8F1.toInt(),0xFFFFFFFF.toInt(),0xFF082427.toInt())[themeIndex]
+    private val primaryText get() = intArrayOf(0xFF18181A.toInt(),0xFFEDEDEF.toInt(),0xFF0D2427.toInt(),0xFF2B241D.toInt(),0xFF1C2620.toInt(),0xFFE2F2F2.toInt())[themeIndex]
+    private val secondaryText get() = intArrayOf(0xFF77777D.toInt(),0xFF99999F.toInt(),0xFF61777A.toInt(),0xFF827568.toInt(),0xFF69776D.toInt(),0xFF9BBFC0.toInt())[themeIndex]
+    private val accentColor get() = intArrayOf(0xFF18181A.toInt(),0xFFEDEDEF.toInt(),0xFF0B7A80.toInt(),0xFF9A4A24.toInt(),0xFF3B6B4C.toInt(),0xFF19C3CD.toInt())[themeIndex]
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -36,18 +44,18 @@ class ModelCenterActivity : ComponentActivity() {
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(18))
-            setBackgroundColor(0xFFF5F6F8.toInt())
+            setBackgroundColor(pageBg)
         }
         root.addView(TextView(this).apply {
             text = "模型中心"
             textSize = 26f
-            setTextColor(0xFF20242B.toInt())
+            setTextColor(primaryText)
             gravity = Gravity.CENTER_VERTICAL
         }, params())
         root.addView(TextView(this).apply {
             text = "模型目录来自 Yovoice 上游，共 ${ModelCatalog.load(this@ModelCenterActivity).size} 个模型条目。点击下载后保存到手机本地。"
             textSize = 13f
-            setTextColor(0xFF68717D.toInt())
+            setTextColor(secondaryText)
             setPadding(0, dp(5), 0, dp(12))
         }, params())
 
@@ -102,7 +110,7 @@ class ModelCenterActivity : ComponentActivity() {
         val card = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(14))
-            setBackgroundColor(0xFFFFFFFF.toInt())
+            setBackgroundColor(surface)
         }
         card.addView(TextView(this).apply {
             text = model.name
@@ -132,12 +140,16 @@ class ModelCenterActivity : ComponentActivity() {
                 "尚未下载"
             }
             textSize = 12f
-            setTextColor(0xFF4D657D.toInt())
+            setTextColor(accentColor)
             setPadding(0, dp(7), 0, dp(3))
         }
         card.addView(status, params())
 
-        val action = Button(this)
+        val action = Button(this).apply {
+            isAllCaps = false
+            setTextColor(if (themeIndex == 1 || themeIndex == 5) 0xFF06191A.toInt() else 0xFFFFFFFF.toInt())
+            backgroundTintList = ColorStateList.valueOf(accentColor)
+        }
         card.addView(action, params())
         val uniqueName = "model-download-${model.id}"
         var state: WorkInfo.State? = null
