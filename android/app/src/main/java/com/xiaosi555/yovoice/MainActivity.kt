@@ -19,6 +19,9 @@ import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
 import java.util.Locale
+import java.io.File
+import org.json.JSONObject
+import java.util.concurrent.Executors
 
 /** Mobile studio shell following Yovoice desktop theme tokens and visual hierarchy. */
 class MainActivity : Activity(), TextToSpeech.OnInitListener {
@@ -26,6 +29,8 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     private var ttsReady = false
     private var player: MediaPlayer? = null
     private var destroyed = false
+    private var nativeBusy = false
+    private val nativeExecutor = Executors.newSingleThreadExecutor()
     private lateinit var body: LinearLayout
     private lateinit var input: EditText
     private lateinit var status: TextView
@@ -118,7 +123,8 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             setPadding(dp(14), 0, dp(14), 0); background = shape(p.bg, dp(13), p.border, dp(1))
         }
         panel.addView(engine, LinearLayout.LayoutParams(-1, dp(48)).apply { topMargin = dp(10) })
-        panel.addView(primaryButton("〽  试听朗读") { speak() }, marginTop(10))
+        panel.addView(primaryButton("〽  试听朗读（系统语音）") { speak() }, marginTop(10))
+        panel.addView(secondaryButton("本地 AI 语音 · Audio8 TTS") { speakWithLocalModel() }, marginTop(9))
         body.addView(panel, marginTop(18))
         val shortcuts = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
         shortcuts.addView(secondaryButton("♬  导入音频") { chooseAudio() }, LinearLayout.LayoutParams(0, dp(64), 1f))
@@ -220,6 +226,69 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     private fun marginTop(value: Int) = LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(value) }
     private fun dp(value: Int) = (value * resources.displayMetrics.density).toInt()
 
+    private fun speakWithLocalModel() {
+        val text = input.text?.toString()?.trim().orEmpty()
+        if (text.isBlank()) {
+            Toast.makeText(this, "请先输入要合成的文字", Toast.LENGTH_SHORT).show()
+            return
+        }
+        if (nativeBusy) {
+            Toast.makeText(this, "本地语音引擎正在处理，请稍候", Toast.LENGTH_SHORT).show()
+            return
+        }
+        val model = ModelCatalog.load(this).firstOrNull { it.id == "audio8-tts-0.6b-q8" }
+        if (model == null || !ModelCatalog.isInstalled(this, model)) {
+            Toast.makeText(this, "请先到模型中心下载 Audio8 TTS 模型（约 1.43 GB）", Toast.LENGTH_LONG).show()
+            page = 2
+            render()
+            return
+        }
+        nativeBusy = true
+        if (::status.isInitialized) status.text = "正在检查 Android 原生语音引擎…"
+        nativeExecutor.execute {
+            try {
+                val probe = JSONObject(NativeEngine.probe())
+                check(probe.optString("status") == "ready") {
+                    probe.optString("message", "Android 原生引擎不可用")
+                }
+                val families = probe.optJSONArray("families")
+                check(families != null && (0 until families.length()).any { families.optString(it) == "audio8_tts" }) {
+                    "当前原生库未包含 Audio8 TTS 模型支持"
+                }
+                val modelDir = ModelCatalog.installedDirectory(this, model.id)
+                val manifest = JSONObject(File(modelDir, "yovoice-model.json").readText())
+                val modelFile = File(modelDir, manifest.getString("mainFile"))
+                check(modelFile.isFile && modelFile.length() > 0L) { "模型主文件不存在或为空" }
+
+                runOnUiThread { if (!destroyed && ::status.isInitialized) status.text = "正在加载本地 Audio8 模型（首次加载可能较久）…" }
+                val loaded = JSONObject(NativeEngine.loadModel(modelFile.absolutePath, model.family, 2))
+                check(loaded.optBoolean("ok")) { loaded.optString("error", "模型加载失败") }
+
+                val output = File(cacheDir, "audio8-preview-${System.currentTimeMillis()}.wav")
+                runOnUiThread { if (!destroyed && ::status.isInitialized) status.text = "模型已加载，正在合成中文语音…" }
+                val result = JSONObject(NativeEngine.synthesize(text, "zh", output.absolutePath))
+                check(result.optBoolean("ok")) { result.optString("error", "语音合成失败") }
+                check(output.isFile && output.length() > 44L) { "合成结果文件无效" }
+
+                runOnUiThread {
+                    if (!destroyed && !isFinishing) {
+                        if (::status.isInitialized) status.text = "Audio8 本地合成完成 · ${output.length() / 1024} KB"
+                        playAudio(Uri.fromFile(output))
+                    }
+                }
+            } catch (error: Throwable) {
+                runOnUiThread {
+                    if (!destroyed && !isFinishing) {
+                        if (::status.isInitialized) status.text = "本地 AI 语音失败：${error.localizedMessage ?: error.javaClass.simpleName}"
+                        Toast.makeText(this, "本地语音处理失败，请查看运行状态", Toast.LENGTH_LONG).show()
+                    }
+                }
+            } finally {
+                nativeBusy = false
+            }
+        }
+    }
+
     private fun speak() {
         val text = input.text?.toString()?.trim().orEmpty()
         if (text.isBlank()) { Toast.makeText(this, "请先输入要朗读的文字", Toast.LENGTH_SHORT).show(); return }
@@ -266,6 +335,8 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     private fun releasePlayer() { runCatching { player?.stop() }; runCatching { player?.release() }; player = null }
     override fun onDestroy() {
         destroyed = true; releasePlayer()
+        nativeExecutor.shutdownNow()
+        runCatching { NativeEngine.unload() }
         runCatching { tts?.stop() }; runCatching { tts?.shutdown() }; tts = null
         super.onDestroy()
     }
