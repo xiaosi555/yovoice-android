@@ -36,7 +36,8 @@ jobs:
         run: |
           yes | "${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null
           "${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager" \
-            "platform-tools" "platforms;android-35" "build-tools;35.0.0"
+            "platform-tools" "platforms;android-35" "build-tools;35.0.0" \\
+            "ndk;27.2.12479018" "cmake;3.31.6"
 
       - name: Install Gradle 8.13
         run: |
@@ -44,8 +45,8 @@ jobs:
           unzip -q /tmp/gradle.zip -d /tmp
           echo "/tmp/gradle-8.13/bin" >> "$GITHUB_PATH"
 
-      - name: Verify Android source and unit tests (no APK packaging)
-        run: gradle --no-daemon -p android :app:testDebugUnitTest
+      - name: Compile ARM64 JNI runtime and verify Android source/unit tests (no APK packaging)
+        run: gradle --no-daemon -p android :app:externalNativeBuildDebug :app:testDebugUnitTest
 
       # assembleDebug / bundleRelease intentionally disabled until the release gate
       # includes native runtime, model lifecycle, device smoke tests and inference tests.
