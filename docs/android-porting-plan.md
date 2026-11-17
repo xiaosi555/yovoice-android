@@ -60,16 +60,16 @@
 ### 阶段 A：启动与 Android 工程
 - [x] 修复 TTS 初始化时序和 Activity 生命周期。
 - [x] 增加 Android 源码编译与单元测试验证工作流（当前已有模型元数据单元测试）。
-- [ ] Android 模拟器启动测试和崩溃日志采集仍待执行。
+- [ ] Android 模拟器启动测试和崩溃日志采集仍待执行；CI 源码编译通过不代表设备启动通过。
 - [x] 将 APK 打包从日常 push CI 中移除，改为人工验证门禁。
 
 ### 阶段 B：Android 原生引擎
 - [x] 固定 audio.cpp 上游提交 `a6e32214e762aca6126eb7206a5497f11d064303`，建立 NDK/CMake ARM64 CPU 交叉编译工程。
 - [x] CMake 已成功完成 Android NDK 配置。
-- [x] 首次全量上游模型编译定位到桌面 LatentSync 的 `posix_spawn` API 不受 Android NDK 支持；已改为只编译 Yovoice 模型目录对应的 25 个模型族/别名，避免把无关桌面模型带入 Android。
+- [x] 首次全量上游模型编译定位到桌面 LatentSync 的 `posix_spawn` API 不受 Android NDK 支持；已改为首个端到端里程碑仅编译 `audio8_tts` 模型族，避免一次引入尚未适配的其他模型族和桌面专用模块。
 - [x] 增加 Kotlin NativeEngine 与 JNI 原生注册表探测入口，CMake 目标同时构建 `libaudiocpp.so` 和 `libyovoice_jni.so`。
-- [ ] 精简模型族后的 ARM64 编译、ELF ABI 检查和产物上传仍在 CI 队列中验证。
-- [ ] JNI 模型加载、推理、音频返回和取消尚未接入。
+- [x] `audio8_tts` 精简模型族的 ARM64 编译、ELF ABI 检查和原生库产物上传已通过 GitHub Actions。
+- [x] JNI 模型加载、TTS 请求、PCM 音频结果转 WAV、卸载入口已接入主页面后台线程；实际设备推理、内存峰值和音频播放仍待真机验证。
 - [ ] 再评估 Go Workbench 可移植业务层；不能直接照搬桌面进程管理。
 
 ### 阶段 C：模型中心
@@ -78,7 +78,7 @@
 - [x] 实现 Hugging Face、HF 镜像、ModelScope 下载 URL 规则。
 - [x] 实现 WorkManager 后台下载、断点续传、暂停/继续、磁盘空间检查。
 - [x] 实现逐文件大小与 SHA-256 校验、多文件全部通过后原子安装。
-- [ ] 下载真实模型、校验、重新打开应用识别、JNI 加载和推理仍待端到端测试。
+- [ ] 下载真实 Audio8 模型、断点续传/校验、重新打开应用识别、JNI 加载和中文推理仍待端到端测试。
 
 ### 阶段 D：端到端功能
 - 先打通一个轻量 TTS 模型的下载 → 校验 → 加载 → 中文朗读 → WAV 输出。
@@ -91,8 +91,11 @@
 
 ## 当前状态（2026-11-18）
 
-- Android Kotlin 源码与模型中心单元测试工作流已通过一次基础编译验证；模型 URL/文件包规则测试正在新一轮 CI 中运行。
-- audio.cpp Android ARM64 CMake 配置成功；原生库完整编译仍在运行，尚无已验证的 Android `.so` 产物。
-- 模型目录与后台下载代码已提交，但尚未完成真实大模型下载、暂停恢复、损坏文件重试和手机存储恢复测试。
-- 已有 JNI 探测代码，但尚未把原生库接入 APK，也没有模型加载或实际推理结果。
-- **尚未达到 APK 发布门禁，不生成或交付 APK。**
+- Android 专项源码验证工作流已通过：ARM64 JNI 原生编译、Kotlin/Android 源码编译与单元测试均成功。
+- Android ARM64 原生库工作流已通过，上传了 `libaudiocpp.so` 与 `libyovoice_jni.so`；该结果证明交叉编译和符号检查成功，不等于真机推理成功。
+- 首个本地推理目标为 Audio8 TTS Q8（约 1.43 GB）。主界面已接入模型安装检查、原生引擎探测、模型加载、中文 TTS 请求、WAV 输出与播放流程；推理放在后台线程执行。
+- 新增独立 ARM64 Debug APK 构建工作流，使用 Gradle 并行 worker；构建后检查 APK 内两份 ARM64 原生库并上传测试包。目前等待本轮构建完成。
+- 尚未在 REDMI Note 17 Pro 真机完成安装、冷启动、模型下载、SHA-256 校验、模型加载、中文推理、音频播放和内存峰值测试。因此当前 APK 即使成功打包，也只能作为设备测试包，不能标记为正式可用版本。
+- 其他 Yovoice 桌面功能（声音克隆、ASR/字幕、故事配音、音乐生成、音轨分离、MIDI/乐谱、项目管理）尚未完成 Android 后端移植；目前不显示为已实现功能。
+- 原仓库桌面 CI 的 Linux job 曾因等待 WebKitGTK/Xvfb 初始化状态超时而失败，该项与 Android 专项构建分开跟踪。
+
