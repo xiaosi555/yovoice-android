@@ -40,15 +40,18 @@ jobs:
             -DCMAKE_BUILD_TYPE=Release
 
       - name: Build embedded inference library
-        run: cmake --build build/audio-android-arm64 --target audiocpp --parallel 2
+        run: cmake --build build/audio-android-arm64 --target yovoice_jni --parallel 2
 
       - name: Verify Android ELF and C ABI exports
         run: |
           LIB="build/audio-android-arm64/bin/libaudiocpp.so"
+          JNI="build/audio-android-arm64/bin/libyovoice_jni.so"
           test -s "$LIB"
-          file "$LIB"
+          test -s "$JNI"
+          file "$LIB" "$JNI"
           "${ANDROID_HOME}/ndk/27.2.12479018/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-readelf" -h "$LIB" | grep -E "Class:|Machine:"
           "${ANDROID_HOME}/ndk/27.2.12479018/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-nm" -D "$LIB" | grep "audiocpp_abi_version"
+          "${ANDROID_HOME}/ndk/27.2.12479018/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-nm" -D "$JNI" | grep "Java_com_xiaosi555_yovoice_NativeEngine_nativeProbe"
 
       - name: Upload Android ARM64 runtime library
         uses: actions/upload-artifact@v4
@@ -56,6 +59,7 @@ jobs:
           name: yovoice-audio-cpp-android-arm64
           path: |
             build/audio-android-arm64/bin/libaudiocpp.so
+            build/audio-android-arm64/bin/libyovoice_jni.so
             build/audio-android-arm64/_deps/audio_cpp-src/include/audiocpp.h
           if-no-files-found: error
           retention-days: 14
