@@ -10,6 +10,13 @@ set(AUDIOCPP_BUILD_C_API_STATIC OFF CACHE BOOL "" FORCE)
 set(AUDIOCPP_DEPLOYMENT_BUILD ON CACHE BOOL "" FORCE)
 set(AUDIOCPP_BUILD_NATIVE_MODEL_MANAGER OFF CACHE BOOL "" FORCE)
 
+# 只编译 Yovoice 模型目录实际使用的模型族，避免把上游 140+ 个无关模型都塞入 APK。
+# Gradium Phonon、HTDemucs 6-stem 与 BS-RoFormer 使用 audio.cpp 对应的官方别名。
+set(AUDIOCPP_MODEL_SET custom CACHE STRING "" FORCE)
+set(AUDIOCPP_MODELS
+    "index_tts2,voxcpm2,omnivoice,qwen3_tts,breeze_tts,ming3_tts,voxtral_tts,plapre,xtts_v2,gradium_phonon,fish_drama3,audio8_tts,kokoro_tts,ace_step,stable_audio,yue2,sheetsage2,qwen3_asr,confucius4_r2t2,parakeet_tdt,htdemucs_6stems,bs_roformer,muscriptor,qwen3_forced_aligner,mms_forced_aligner"
+    CACHE STRING "" FORCE)
+
 # Android 首轮只构建 ARM64 CPU 后端；关闭桌面 GPU、OpenMP 与宿主机 ISA 探测。
 set(ENGINE_ENABLE_CUDA OFF CACHE BOOL "" FORCE)
 set(ENGINE_ENABLE_HIP OFF CACHE BOOL "" FORCE)
