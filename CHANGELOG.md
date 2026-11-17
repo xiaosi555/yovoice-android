@@ -4,6 +4,10 @@
 
 ## [Unreleased]
 
+### 简体中文
+- 新增 Android 原生基础版：支持调用手机系统 TTS 试听文字，并通过系统文件选择器导入、试听本地音频；Android APK 可由 GitHub Actions 自动构建。离线模型及桌面端高级音频功能仍在适配中。
+
+
 ### English
 
 - Fix data loss: generating speech no longer silently deletes older takes after ten versions. API history and completed story takes are also retained during generation, startup and residual cleanup until explicitly deleted.
