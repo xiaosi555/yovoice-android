@@ -66,8 +66,10 @@
 ### 阶段 B：Android 原生引擎
 - [x] 固定 audio.cpp 上游提交 `a6e32214e762aca6126eb7206a5497f11d064303`，建立 NDK/CMake ARM64 CPU 交叉编译工程。
 - [x] CMake 已成功完成 Android NDK 配置。
-- [ ] `libaudiocpp.so` 编译、ELF ABI 检查和产物上传仍在 CI 中验证。
-- [ ] 后续定义 Kotlin ↔ JNI ↔ C++ 接口，打通模型加载、推理、音频返回和取消。
+- [x] 首次全量上游模型编译定位到桌面 LatentSync 的 `posix_spawn` API 不受 Android NDK 支持；已改为只编译 Yovoice 模型目录对应的 25 个模型族/别名，避免把无关桌面模型带入 Android。
+- [x] 增加 Kotlin NativeEngine 与 JNI 原生注册表探测入口，CMake 目标同时构建 `libaudiocpp.so` 和 `libyovoice_jni.so`。
+- [ ] 精简模型族后的 ARM64 编译、ELF ABI 检查和产物上传仍在 CI 队列中验证。
+- [ ] JNI 模型加载、推理、音频返回和取消尚未接入。
 - [ ] 再评估 Go Workbench 可移植业务层；不能直接照搬桌面进程管理。
 
 ### 阶段 C：模型中心
@@ -92,5 +94,5 @@
 - Android Kotlin 源码与模型中心单元测试工作流已通过一次基础编译验证；模型 URL/文件包规则测试正在新一轮 CI 中运行。
 - audio.cpp Android ARM64 CMake 配置成功；原生库完整编译仍在运行，尚无已验证的 Android `.so` 产物。
 - 模型目录与后台下载代码已提交，但尚未完成真实大模型下载、暂停恢复、损坏文件重试和手机存储恢复测试。
-- 目前没有 Android JNI 引擎集成，也没有模型实际推理结果。
+- 已有 JNI 探测代码，但尚未把原生库接入 APK，也没有模型加载或实际推理结果。
 - **尚未达到 APK 发布门禁，不生成或交付 APK。**
