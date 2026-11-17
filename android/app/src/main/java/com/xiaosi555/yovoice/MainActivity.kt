@@ -122,7 +122,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
 
         val scroll = ScrollView(this).apply {
             isFillViewport = true
-            addView(content, ScrollView.LayoutParams(
+            addView(content, ViewGroup.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT
             ))
