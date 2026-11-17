@@ -140,8 +140,14 @@ object ModelCatalog {
         return cachedRevision ?: error("模型目录尚未加载")
     }
 
-    fun installedDirectory(context: Context, id: String): File =
-        File(File(context.filesDir, "models"), id)
+    fun installedDirectory(context: Context, id: String): File {
+        val root = File(context.filesDir, "models")
+        val installed = File(root, id)
+        val backup = File(root, ".$id.backup")
+        // 上次安装若在目录切换中被系统终止，优先恢复上一份完整模型。
+        if (!installed.exists() && backup.exists()) backup.renameTo(installed)
+        return installed
+    }
 
     fun isInstalled(context: Context, model: ModelEntry): Boolean {
         val root = installedDirectory(context, model.id)
@@ -150,6 +156,8 @@ object ModelCatalog {
         return runCatching {
             val data = JSONObject(manifest.readText())
             if (data.optString("modelId") != model.id) return false
+            if (!data.optBoolean("verified", false)) return false
+            if (data.optString("version") != model.version) return false
             val files = data.getJSONArray("files")
             if (files.length() != model.packageFiles().size) return false
             for (i in 0 until files.length()) {
