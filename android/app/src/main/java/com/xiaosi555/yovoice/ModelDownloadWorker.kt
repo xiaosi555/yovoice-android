@@ -57,6 +57,8 @@ class ModelDownloadWorker(
         val modelsRoot = File(applicationContext.filesDir, "models")
         if (!modelsRoot.exists() && !modelsRoot.mkdirs()) throw IOException("无法创建模型目录")
         val staging = File(modelsRoot, ".${model.id}.staging")
+        val installed = ModelCatalog.installedDirectory(applicationContext, model.id)
+        val backup = File(modelsRoot, ".${model.id}.backup")
         if (!staging.exists() && !staging.mkdirs()) throw IOException("无法创建临时下载目录")
 
         // 续传时只计算尚未下载的字节，避免把已完成的断点再次计入空间需求。
@@ -122,8 +124,6 @@ class ModelDownloadWorker(
             .put("verifiedAt", System.currentTimeMillis())
         File(staging, "yovoice-model.json").writeText(manifest.toString(), Charsets.UTF_8)
 
-        val installed = ModelCatalog.installedDirectory(applicationContext, model.id)
-        val backup = File(modelsRoot, ".${model.id}.backup")
         if (backup.exists()) backup.deleteRecursively()
         if (installed.exists() && !installed.renameTo(backup)) throw IOException("无法备份旧模型")
         if (!staging.renameTo(installed)) {
