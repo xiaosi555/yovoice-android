@@ -4,8 +4,6 @@
 
 ## [Unreleased]
 
-## [Unreleased]
-
 ### 简体中文
 - 修复 Android 原型中系统 TTS 初始化与界面状态控件之间的时序风险，并为音频播放和 Activity 生命周期增加异常保护。
 - 暂停 Android APK 自动打包；改为手动验证门禁，待 Android 原生推理运行时、模型下载/校验/加载和端到端真机测试完成后再构建交付。
