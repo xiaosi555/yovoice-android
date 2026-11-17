@@ -53,7 +53,10 @@ endif()
 add_library(yovoice_jni SHARED yovoice_jni.cpp)
 target_include_directories(yovoice_jni PRIVATE "${audio_cpp_SOURCE_DIR}/include")
 target_compile_features(yovoice_jni PRIVATE cxx_std_17)
-find_library(ANDROID_LOG_LIB log)
+find_library(ANDROID_LOG_LIB log REQUIRED)
+# audio.cpp itself calls Android logging APIs; linking log only to the JNI
+# wrapper is insufficient because the undefined symbol is in libaudiocpp.so.
+target_link_libraries(audiocpp PUBLIC ${ANDROID_LOG_LIB})
 target_link_libraries(yovoice_jni PRIVATE audiocpp ${ANDROID_LOG_LIB})
 set_target_properties(yovoice_jni PROPERTIES
     LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
