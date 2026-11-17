@@ -1,7 +1,7 @@
 name: Android Validation (APK 发布门禁)
 
 on:
-  # 仅手动运行。开发期间推送代码不自动产出 APK；
+  # 开发期间推送代码只运行源码与单元测试，不会产出 APK；
   # 只有 Android 端功能、模型下载/校验/加载和真机测试通过后，才启用发布构建。
   workflow_dispatch:
   push:
