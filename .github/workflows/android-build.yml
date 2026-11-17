@@ -1,21 +1,22 @@
-name: Android APK Build
+name: Android Validation (APK 发布门禁)
 
 on:
+  # 仅手动运行。开发期间推送代码不自动产出 APK；
+  # 只有 Android 端功能、模型下载/校验/加载和真机测试通过后，才启用发布构建。
   workflow_dispatch:
-  push:
-    branches: [main]
-    paths:
-      - "android/**"
-      - ".github/workflows/android-build.yml"
 
 permissions:
   contents: read
 
+concurrency:
+  group: android-validation-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
-  build-apk:
-    name: Build debug APK
+  android-validation:
+    name: Android validation gate
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -38,13 +39,8 @@ jobs:
           unzip -q /tmp/gradle.zip -d /tmp
           echo "/tmp/gradle-8.13/bin" >> "$GITHUB_PATH"
 
-      - name: Build APK
-        run: gradle --no-daemon -p android :app:assembleDebug
+      - name: Verify Android source and unit tests (no APK packaging)
+        run: gradle --no-daemon -p android :app:testDebugUnitTest
 
-      - name: Upload APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: yovoice-android-debug-apk
-          path: android/app/build/outputs/apk/debug/*.apk
-          if-no-files-found: error
-          retention-days: 14
+      # assembleDebug / bundleRelease intentionally disabled until the release gate
+      # includes native runtime, model lifecycle, device smoke tests and inference tests.
