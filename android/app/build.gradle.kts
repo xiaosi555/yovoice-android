@@ -15,7 +15,7 @@ android {
         versionCode = 1
         versionName = "0.1.0"
         ndk { abiFilters += listOf("arm64-v8a") }
-        externalNativeBuild { cmake { cppFlags += "-std=c++17" } }
+        externalNativeBuild { cmake { cppFlags += "-std=c++17"; targets += listOf("yovoice_jni") } }
     }
 
     buildTypes {
