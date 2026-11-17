@@ -36,7 +36,7 @@ jobs:
         run: |
           yes | "${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null
           "${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager" \
-            "platform-tools" "platforms;android-35" "build-tools;35.0.0" \\
+            "platform-tools" "platforms;android-35" "build-tools;35.0.0" \
             "ndk;27.2.12479018" "cmake;3.31.6"
 
       - name: Install Gradle 8.13
