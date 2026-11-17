@@ -56,14 +56,29 @@ class ModelDownloadWorker(
 
         val modelsRoot = File(applicationContext.filesDir, "models")
         if (!modelsRoot.exists() && !modelsRoot.mkdirs()) throw IOException("无法创建模型目录")
-        val stat = StatFs(modelsRoot.absolutePath)
-        val required = total + 64L * 1024L * 1024L
-        if (stat.availableBytes < required) {
-            throw IllegalStateException("手机可用空间不足，需要至少 ${ModelEntry.formatBytes(required)}")
-        }
-
         val staging = File(modelsRoot, ".${model.id}.staging")
         if (!staging.exists() && !staging.mkdirs()) throw IOException("无法创建临时下载目录")
+
+        // 续传时只计算尚未下载的字节，避免把已完成的断点再次计入空间需求。
+        var remaining = 0L
+        for (file in files) {
+            val relative = safeRelativePath(model.localRelativePath(file.path))
+            val target = File(staging, relative)
+            val validTarget = target.isFile &&
+                target.length() == file.size &&
+                sha256(target).equals(file.sha256, true)
+            if (validTarget) continue
+            if (target.exists() && !target.delete()) throw IOException("无法清理无效的临时模型文件")
+            val part = File(target.parentFile ?: staging, target.name + ".part")
+            val partialBytes = if (part.isFile) part.length().coerceIn(0L, file.size) else 0L
+            remaining += file.size - partialBytes
+        }
+        val stat = StatFs(modelsRoot.absolutePath)
+        val required = remaining + 64L * 1024L * 1024L
+        if (stat.availableBytes < required) {
+            throw IllegalStateException("手机可用空间不足，剩余下载至少需要 ${ModelEntry.formatBytes(required)}")
+        }
+
         var completed = 0L
         val manifestFiles = JSONArray()
 
