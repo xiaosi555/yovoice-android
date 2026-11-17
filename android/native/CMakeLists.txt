@@ -48,3 +48,13 @@ FetchContent_MakeAvailable(audio_cpp)
 if (NOT TARGET audiocpp)
     message(FATAL_ERROR "audio.cpp did not define the expected audiocpp C ABI target")
 endif()
+
+# JNI bridge: expose a minimal native runtime probe to Kotlin.
+add_library(yovoice_jni SHARED yovoice_jni.cpp)
+target_include_directories(yovoice_jni PRIVATE "${audio_cpp_SOURCE_DIR}/include")
+target_compile_features(yovoice_jni PRIVATE cxx_std_17)
+find_library(ANDROID_LOG_LIB log)
+target_link_libraries(yovoice_jni PRIVATE audiocpp ${ANDROID_LOG_LIB})
+set_target_properties(yovoice_jni PROPERTIES
+    LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
+)
