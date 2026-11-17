@@ -1,0 +1,223 @@
+package com.xiaosi555.yovoice
+
+import android.os.Bundle
+import android.view.Gravity
+import android.view.ViewGroup
+import android.widget.ArrayAdapter
+import android.widget.Button
+import android.widget.LinearLayout
+import android.widget.ScrollView
+import android.widget.Spinner
+import android.widget.TextView
+import android.widget.Toast
+import androidx.activity.ComponentActivity
+import androidx.core.view.setPadding
+import androidx.work.Constraints
+import androidx.work.ExistingWorkPolicy
+import androidx.work.NetworkType
+import androidx.work.OneTimeWorkRequestBuilder
+import androidx.work.WorkInfo
+import androidx.work.WorkManager
+import androidx.work.workDataOf
+import java.util.concurrent.TimeUnit
+
+class ModelCenterActivity : ComponentActivity() {
+    private lateinit var workManager: WorkManager
+    private lateinit var sourcePicker: Spinner
+    private val downloadStates = mutableMapOf<String, WorkInfo.State?>()
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        workManager = WorkManager.getInstance(applicationContext)
+        buildPage()
+    }
+
+    private fun buildPage() {
+        val root = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(18))
+            setBackgroundColor(0xFFF5F6F8.toInt())
+        }
+        root.addView(TextView(this).apply {
+            text = "模型中心"
+            textSize = 26f
+            setTextColor(0xFF20242B.toInt())
+            gravity = Gravity.CENTER_VERTICAL
+        }, params())
+        root.addView(TextView(this).apply {
+            text = "模型目录来自 Yovoice 上游，共 ${ModelCatalog.load(this@ModelCenterActivity).size} 个模型条目。点击下载后保存到手机本地。"
+            textSize = 13f
+            setTextColor(0xFF68717D.toInt())
+            setPadding(0, dp(5), 0, dp(12))
+        }, params())
+
+        sourcePicker = Spinner(this).apply {
+            adapter = ArrayAdapter(
+                this@ModelCenterActivity,
+                android.R.layout.simple_spinner_dropdown_item,
+                listOf("Hugging Face（默认）", "HF 镜像", "ModelScope")
+            )
+        }
+        root.addView(TextView(this).apply {
+            text = "下载源"
+            textSize = 13f
+            setTextColor(0xFF68717D.toInt())
+        }, params())
+        root.addView(sourcePicker, params())
+
+        root.addView(TextView(this).apply {
+            text = "说明：下载完成会逐文件校验大小和 SHA-256，多文件模型全部通过后才会安装登记。当前 Android 推理库仍在构建验证，已下载不代表现在就能加载推理。大模型可能超过手机可用存储或运行内存。"
+            textSize = 12f
+            setTextColor(0xFF8A5B26.toInt())
+            setPadding(dp(12), dp(10), dp(12), dp(10))
+            setBackgroundColor(0xFFFFF2DD.toInt())
+        }, params().apply { topMargin = dp(10); bottomMargin = dp(10) })
+
+        root.addView(Button(this).apply {
+            text = "返回"
+            setOnClickListener { finish() }
+        }, params())
+
+        val list = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        for (model in ModelCatalog.load(this)) {
+            list.addView(createModelCard(model), params().apply { topMargin = dp(9) })
+        }
+
+        val scroll = ScrollView(this).apply {
+            isFillViewport = true
+            addView(list, ViewGroup.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
+            ))
+        }
+        root.addView(scroll, LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT,
+            0,
+            1f
+        ))
+        setContentView(root)
+    }
+
+    private fun createModelCard(model: ModelEntry): LinearLayout {
+        val card = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(14))
+            setBackgroundColor(0xFFFFFFFF.toInt())
+        }
+        card.addView(TextView(this).apply {
+            text = model.name
+            textSize = 17f
+            setTextColor(0xFF20242B.toInt())
+        }, params())
+        card.addView(TextView(this).apply {
+            text = "${model.family} · ${model.version} · ${model.precision} · ${model.formattedSize()} · ${model.packageFiles().size} 个文件"
+            textSize = 12f
+            setTextColor(0xFF68717D.toInt())
+            setPadding(0, dp(4), 0, dp(4))
+        }, params())
+        card.addView(TextView(this).apply {
+            text = if (model.packageSize() >= 2L * 1024 * 1024 * 1024) {
+                "大模型：下载前请确认手机剩余空间；能否推理取决于设备内存与 Android 后端适配。"
+            } else {
+                "下载后仍需 Android 推理引擎支持，暂未标记为已验证可运行。"
+            }
+            textSize = 11f
+            setTextColor(0xFF818A96.toInt())
+        }, params())
+
+        val status = TextView(this).apply {
+            text = if (ModelCatalog.isInstalled(this@ModelCenterActivity, model)) {
+                "已下载并通过文件校验 · 等待推理引擎接入"
+            } else {
+                "尚未下载"
+            }
+            textSize = 12f
+            setTextColor(0xFF4D657D.toInt())
+            setPadding(0, dp(7), 0, dp(3))
+        }
+        card.addView(status, params())
+
+        val action = Button(this)
+        card.addView(action, params())
+        val uniqueName = "model-download-${model.id}"
+        var state: WorkInfo.State? = null
+        var installed = ModelCatalog.isInstalled(this, model)
+
+        fun update(info: WorkInfo?) {
+            state = info?.state
+            installed = ModelCatalog.isInstalled(this, model)
+            when (info?.state) {
+                WorkInfo.State.RUNNING, WorkInfo.State.ENQUEUED, WorkInfo.State.BLOCKED -> {
+                    val done = info.progress.getLong("downloaded", 0L)
+                    val total = info.progress.getLong("total", model.packageSize())
+                    val percent = if (total > 0L) (done * 100 / total).coerceIn(0, 100) else 0
+                    status.text = if (info.state == WorkInfo.State.RUNNING) {
+                        "下载中：$percent%（${ModelEntry.formatBytes(done)} / ${ModelEntry.formatBytes(total)}）"
+                    } else {
+                        "等待下载任务启动…"
+                    }
+                    action.text = "暂停下载"
+                }
+                WorkInfo.State.SUCCEEDED -> {
+                    status.text = if (installed) "已下载并通过 SHA-256 校验 · 等待推理引擎接入" else "安装文件缺失，请重新下载"
+                    action.text = if (installed) "已下载" else "重新下载"
+                }
+                WorkInfo.State.CANCELLED -> {
+                    status.text = "下载已暂停；已完成的文件和断点会保留"
+                    action.text = "继续下载"
+                }
+                WorkInfo.State.FAILED -> {
+                    status.text = "下载失败：${info.outputData.getString("error") ?: "可点击重试"}"
+                    action.text = "重试下载"
+                }
+                else -> {
+                    status.text = if (installed) "已下载并通过文件校验 · 等待推理引擎接入" else "尚未下载"
+                    action.text = if (installed) "已下载" else "下载模型"
+                }
+            }
+        }
+
+        workManager.getWorkInfosForUniqueWorkLiveData(uniqueName).observe(this) { infos ->
+            update(infos.firstOrNull())
+        }
+        action.setOnClickListener {
+            when (state) {
+                WorkInfo.State.RUNNING, WorkInfo.State.ENQUEUED, WorkInfo.State.BLOCKED -> {
+                    workManager.cancelUniqueWork(uniqueName)
+                    Toast.makeText(this, "已请求暂停，保留下载断点", Toast.LENGTH_SHORT).show()
+                }
+                WorkInfo.State.SUCCEEDED -> {
+                    if (installed) Toast.makeText(this, "模型文件已校验；Android 推理引擎仍在接入", Toast.LENGTH_LONG).show()
+                    else enqueue(model, uniqueName)
+                }
+                else -> enqueue(model, uniqueName)
+            }
+        }
+        return card
+    }
+
+    private fun enqueue(model: ModelEntry, uniqueName: String) {
+        val source = when (sourcePicker.selectedItemPosition) {
+            1 -> "mirror"
+            2 -> "modelscope"
+            else -> "huggingface"
+        }
+        val request = OneTimeWorkRequestBuilder<ModelDownloadWorker>()
+            .setInputData(workDataOf(
+                ModelDownloadWorker.KEY_MODEL_ID to model.id,
+                ModelDownloadWorker.KEY_SOURCE to source
+            ))
+            .setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build())
+            .setBackoffCriteria( androidx.work.BackoffPolicy.EXPONENTIAL, 30, TimeUnit.SECONDS)
+            .build()
+        workManager.enqueueUniqueWork(uniqueName, ExistingWorkPolicy.KEEP, request)
+        Toast.makeText(this, "已加入下载队列：${model.name}", Toast.LENGTH_SHORT).show()
+    }
+
+    private fun params() = LinearLayout.LayoutParams(
+        ViewGroup.LayoutParams.MATCH_PARENT,
+        ViewGroup.LayoutParams.WRAP_CONTENT
+    )
+
+    private fun dp(value: Int) = (value * resources.displayMetrics.density).toInt()
+}
