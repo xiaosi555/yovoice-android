@@ -1,7 +1,6 @@
 package com.xiaosi555.yovoice
 
 import android.content.Context
-import android.net.Uri
 import org.json.JSONObject
 import java.io.File
 import java.util.Locale
@@ -44,7 +43,7 @@ data class ModelEntry(
     fun fileUrl(file: ModelAssetFile, source: String, catalogRevision: String): String {
         val selectedRepo = file.repo ?: repo
         val selectedRevision = file.revision ?: revision ?: catalogRevision
-        val encodedPath = Uri.encode(file.path, "/")
+        val encodedPath = java.net.URLEncoder.encode(file.path, Charsets.UTF_8.name()).replace("+", "%20").replace("%2F", "/")
         if (selectedRepo != null) {
             return when (source) {
                 "mirror" -> "https://hf-mirror.com/$selectedRepo/resolve/$selectedRevision/$encodedPath"
