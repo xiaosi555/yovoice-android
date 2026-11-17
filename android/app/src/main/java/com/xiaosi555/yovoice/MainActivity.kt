@@ -29,7 +29,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     private var ttsReady = false
     private var player: MediaPlayer? = null
     private var destroyed = false
-    private var nativeBusy = false
+    @Volatile private var nativeBusy = false
     private val nativeExecutor = Executors.newSingleThreadExecutor()
     private lateinit var body: LinearLayout
     private lateinit var input: EditText
@@ -335,8 +335,10 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     private fun releasePlayer() { runCatching { player?.stop() }; runCatching { player?.release() }; player = null }
     override fun onDestroy() {
         destroyed = true; releasePlayer()
-        nativeExecutor.shutdownNow()
-        runCatching { NativeEngine.unload() }
+        runCatching {
+            nativeExecutor.execute { NativeEngine.unload() }
+            nativeExecutor.shutdown()
+        }
         runCatching { tts?.stop() }; runCatching { tts?.shutdown() }; tts = null
         super.onDestroy()
     }
