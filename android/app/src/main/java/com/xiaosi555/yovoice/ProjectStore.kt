@@ -53,7 +53,7 @@ object ProjectStore {
         require(file.isFile && file.length() > 0L) { "项目文件不存在或为空" }
         val now = System.currentTimeMillis()
         val record = ProjectRecord(
-            now.toString() + "-" + file.name.hashCode().toUInt().toString(16),
+            now.toString() + "-" + Integer.toHexString(file.name.hashCode()),
             title,
             category,
             detail,
