@@ -5,6 +5,11 @@ import android.content.res.ColorStateList
 import android.graphics.drawable.GradientDrawable
 import android.view.Gravity
 import android.view.ViewGroup
+import android.view.View
+import android.widget.GridLayout
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
 import android.widget.ArrayAdapter
 import android.widget.Button
 import android.widget.LinearLayout
@@ -36,15 +41,31 @@ class ModelCenterActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        workManager = WorkManager.getInstance(applicationContext)
-        buildPage()
+        try {
+            workManager = WorkManager.getInstance(applicationContext)
+            buildPage()
+        } catch (error: Throwable) {
+            val fallback = TextView(this).apply {
+                text = "模型中心暂时无法打开\\n\\n${error.localizedMessage ?: error.javaClass.simpleName}\\n\\n请返回工作室重试。"
+                textSize = 15f
+                setTextColor(primaryText)
+                setPadding(dp(24))
+            }
+            setContentView(fallback)
+        }
     }
 
     private fun buildPage() {
+        WindowCompat.setDecorFitsSystemWindows(window, false)
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(18))
             setBackgroundColor(pageBg)
+        }
+        ViewCompat.setOnApplyWindowInsetsListener(root) { view, insets ->
+            val bars = insets.getInsets(WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout())
+            view.setPadding(dp(18) + bars.left, dp(18) + bars.top, dp(18) + bars.right, dp(18) + bars.bottom)
+            insets
         }
         root.addView(TextView(this).apply {
             text = "模型中心"
@@ -69,7 +90,7 @@ class ModelCenterActivity : ComponentActivity() {
         root.addView(TextView(this).apply {
             text = "下载源"
             textSize = 13f
-            setTextColor(0xFF68717D.toInt())
+            setTextColor(secondaryText)
         }, params())
         root.addView(sourcePicker, params())
 
@@ -83,13 +104,21 @@ class ModelCenterActivity : ComponentActivity() {
 
         root.addView(Button(this).apply {
             text = "返回"
+            isAllCaps = false
             setOnClickListener { finish() }
-        }, params())
+        }, params().apply { bottomMargin = dp(8) })
 
         val list = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        for (model in ModelCatalog.load(this)) {
-            list.addView(createModelCard(model), params().apply { topMargin = dp(9) })
+        val models = ModelCatalog.load(this)
+        val grid = GridLayout(this).apply { columnCount = 2; useDefaultMargins = false }
+        models.forEachIndexed { index, model ->
+            val card = createModelCard(model)
+            grid.addView(card, GridLayout.LayoutParams(GridLayout.spec(index / 2, 1f), GridLayout.spec(index % 2, 1f)).apply {
+                width = 0; height = ViewGroup.LayoutParams.WRAP_CONTENT
+                setMargins(dp(5), dp(5), dp(5), dp(5))
+            })
         }
+        list.addView(grid, params())
 
         val scroll = ScrollView(this).apply {
             isFillViewport = true
@@ -109,13 +138,13 @@ class ModelCenterActivity : ComponentActivity() {
     private fun createModelCard(model: ModelEntry): LinearLayout {
         val card = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(14))
-            setBackgroundColor(surface)
+            setPadding(dp(12))
+            background = GradientDrawable().apply { setColor(surface); cornerRadius = dp(14).toFloat(); setStroke(dp(1), 0x22808080) }
         }
         card.addView(TextView(this).apply {
             text = model.name
             textSize = 17f
-            setTextColor(0xFF20242B.toInt())
+            setTextColor(primaryText)
         }, params())
         card.addView(TextView(this).apply {
             text = "${model.family} · ${model.version} · ${model.precision} · ${model.formattedSize()} · ${model.packageFiles().size} 个文件"
@@ -130,7 +159,7 @@ class ModelCenterActivity : ComponentActivity() {
                 "下载后仍需 Android 推理引擎支持，暂未标记为已验证可运行。"
             }
             textSize = 11f
-            setTextColor(0xFF818A96.toInt())
+            setTextColor(secondaryText)
         }, params())
 
         val status = TextView(this).apply {
@@ -149,6 +178,7 @@ class ModelCenterActivity : ComponentActivity() {
             isAllCaps = false
             setTextColor(if (themeIndex == 1 || themeIndex == 5) 0xFF06191A.toInt() else 0xFFFFFFFF.toInt())
             backgroundTintList = ColorStateList.valueOf(accentColor)
+            textSize = 12f
         }
         card.addView(action, params())
         val uniqueName = "model-download-${model.id}"
