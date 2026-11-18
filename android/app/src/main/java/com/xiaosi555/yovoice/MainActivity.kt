@@ -1468,7 +1468,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                 val root = ModelCatalog.installedDirectory(this, model.id)
                 val modelFile = File(root, model.localRelativePath(model.remotePath))
                 check(modelFile.isFile) { "Audio8 TTS 模型文件不存在" }
-                val loaded = JSONObject(NativeEngine.loadTaskModel(modelFile.absolutePath, model.family, "clon", "offline"))
+                val loaded = JSONObject(NativeEngine.loadTaskModel(modelFile.absolutePath, model.family, "clon", "offline", threads = nativeThreads()))
                 check(loaded.optBoolean("ok")) { loaded.optString("error", "故事配音模型加载失败") }
                 val pcmA = if (lines.any { it.speaker == roleAName }) AndroidAudioDecoder.decodeTo16kMono(this, roleAUri!!, 30) else null
                 val pcmB = if (lines.any { it.speaker == roleBName }) AndroidAudioDecoder.decodeTo16kMono(this, roleBUri!!, 30) else null
