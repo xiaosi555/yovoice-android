@@ -2024,7 +2024,7 @@ class MainActivity : AppCompatActivity() {
                     if (::status.isInitialized) status.text = "正在读取 MultiTTS 音色包并建立名称映射…"
                     storageExecutor.execute {
                         try {
-                            val imported = MultiTtsPackageImporter.import(this, uri)
+                            val imported = MultiTtsPackageImporter.importPackage(this, uri)
                             runOnUiThread {
                                 if (!destroyed && !isFinishing) {
                                     multiTtsPackage = imported

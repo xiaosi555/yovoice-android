@@ -37,7 +37,7 @@ object MultiTtsPackageImporter {
         val speakers: List<MultiTtsSpeaker>
     )
 
-    fun import(context: Context, uri: Uri): ImportedPackage {
+    fun importPackage(context: Context, uri: Uri): ImportedPackage {
         val resolver = context.contentResolver
         val metadata = readMetadata(context, uri)
         val metaSize = metadata.fileSize
