@@ -39,20 +39,22 @@ object AndroidAudioDecoder {
                 }
             }
             check(audioTrack >= 0 && audioFormat != null) { "文件中没有可读取的音轨" }
-            val duration = runCatching { audioFormat.getLong(MediaFormat.KEY_DURATION) }.getOrDefault(0L)
+            val selectedFormat = audioFormat ?: error("无法读取音轨格式")
+            val duration = runCatching { selectedFormat.getLong(MediaFormat.KEY_DURATION) }.getOrDefault(0L)
             require(duration <= maxDurationSeconds.toLong() * 1_000_000L || duration == 0L) {
                 "音频超过 " + maxDurationSeconds + " 秒限制，请先裁剪文件"
             }
             extractor.selectTrack(audioTrack)
-            val mime = audioFormat.getString(MediaFormat.KEY_MIME) ?: error("音频格式缺少 MIME")
-            codec = MediaCodec.createDecoderByType(mime)
-            codec.configure(audioFormat, null, null, 0)
-            codec.start()
+            val mime = selectedFormat.getString(MediaFormat.KEY_MIME) ?: error("音频格式缺少 MIME")
+            val decoder = MediaCodec.createDecoderByType(mime)
+            codec = decoder
+            decoder.configure(selectedFormat, null, null, 0)
+            decoder.start()
 
             var inputEnded = false
             var outputEnded = false
-            var outputRate = audioFormat.getInteger(MediaFormat.KEY_SAMPLE_RATE)
-            var outputChannels = audioFormat.getInteger(MediaFormat.KEY_CHANNEL_COUNT)
+            var outputRate = selectedFormat.getInteger(MediaFormat.KEY_SAMPLE_RATE)
+            var outputChannels = selectedFormat.getInteger(MediaFormat.KEY_CHANNEL_COUNT)
             var outputEncoding = AudioFormat.ENCODING_PCM_16BIT
             val info = MediaCodec.BufferInfo()
             val collector = ResampledPcmCollector(outputRate, targetSampleRate, targetChannels, maxOutputSamples)
@@ -60,27 +62,27 @@ object AndroidAudioDecoder {
 
             while (!outputEnded) {
                 if (!inputEnded) {
-                    val inputIndex = codec.dequeueInputBuffer(10_000)
+                    val inputIndex = decoder.dequeueInputBuffer(10_000)
                     if (inputIndex >= 0) {
-                        val input = codec.getInputBuffer(inputIndex) ?: error("无法读取解码输入缓冲区")
+                        val input = decoder.getInputBuffer(inputIndex) ?: error("无法读取解码输入缓冲区")
                         val size = extractor.readSampleData(input, 0)
                         if (size < 0) {
-                            codec.queueInputBuffer(inputIndex, 0, 0, 0L, MediaCodec.BUFFER_FLAG_END_OF_STREAM)
+                            decoder.queueInputBuffer(inputIndex, 0, 0, 0L, MediaCodec.BUFFER_FLAG_END_OF_STREAM)
                             inputEnded = true
                         } else {
-                            codec.queueInputBuffer(inputIndex, 0, size, extractor.sampleTime.coerceAtLeast(0L), 0)
+                            decoder.queueInputBuffer(inputIndex, 0, size, extractor.sampleTime.coerceAtLeast(0L), 0)
                             extractor.advance()
                         }
                     }
                 }
 
-                when (val outputIndex = codec.dequeueOutputBuffer(info, 10_000)) {
+                when (val outputIndex = decoder.dequeueOutputBuffer(info, 10_000)) {
                     MediaCodec.INFO_TRY_AGAIN_LATER -> {
                         idleLoops++
                         if (inputEnded && idleLoops > 100) error("音频解码超时")
                     }
                     MediaCodec.INFO_OUTPUT_FORMAT_CHANGED -> {
-                        val format = codec.outputFormat
+                        val format = decoder.outputFormat
                         outputRate = format.getInteger(MediaFormat.KEY_SAMPLE_RATE)
                         outputChannels = format.getInteger(MediaFormat.KEY_CHANNEL_COUNT)
                         outputEncoding = if (format.containsKey(MediaFormat.KEY_PCM_ENCODING)) {
@@ -91,7 +93,7 @@ object AndroidAudioDecoder {
                     MediaCodec.INFO_OUTPUT_BUFFERS_CHANGED -> Unit
                     else -> if (outputIndex >= 0) {
                         idleLoops = 0
-                        val buffer = codec.getOutputBuffer(outputIndex)
+                        val buffer = decoder.getOutputBuffer(outputIndex)
                         if (buffer != null && info.size > 0) {
                             buffer.position(info.offset)
                             buffer.limit(info.offset + info.size)
@@ -123,7 +125,7 @@ object AndroidAudioDecoder {
                             }
                         }
                         if ((info.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0) outputEnded = true
-                        codec.releaseOutputBuffer(outputIndex, false)
+                        decoder.releaseOutputBuffer(outputIndex, false)
                     }
                 }
             }
