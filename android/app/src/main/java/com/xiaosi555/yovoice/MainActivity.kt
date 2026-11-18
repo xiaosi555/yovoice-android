@@ -187,6 +187,7 @@ class MainActivity : ComponentActivity() {
         if (target.id == "tts") {
             activeWorkspaceFeature = null
             page = 0
+            if (model.family == "audio8_tts") activateNativeTtsEngine()
         } else {
             activeWorkspaceFeature = target.id
             page = 1
