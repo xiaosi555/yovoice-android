@@ -154,6 +154,24 @@ class MainActivity : ComponentActivity() {
         (Color.green(from) * (1f - amount) + Color.green(to) * amount).toInt(),
         (Color.blue(from) * (1f - amount) + Color.blue(to) * amount).toInt()
     )
+    private fun applyPlatformTheme() {
+        val dark = when (appearanceMode) {
+            "light" -> false
+            "dark" -> true
+            else -> (resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES
+        }
+        setTheme(if (dark) R.style.YovoiceTheme_Dark else R.style.YovoiceTheme_Light)
+        val accentStyle = when (accentIndex.coerceIn(0, 5)) {
+            0 -> R.style.YovoiceAccentPaper
+            1 -> R.style.YovoiceAccentCoral
+            2 -> R.style.YovoiceAccentLagoon
+            3 -> R.style.YovoiceAccentSand
+            4 -> R.style.YovoiceAccentSage
+            else -> R.style.YovoiceAccentAbyss
+        }
+        theme.applyStyle(accentStyle, true)
+    }
+
     private fun applySystemBars() {
         window.statusBarColor = p.bg
         window.navigationBarColor = p.bg
@@ -163,19 +181,12 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
-        val initialPrefs = getSharedPreferences("yovoice-ui", MODE_PRIVATE)
-        val initialAppearance = initialPrefs.getString("appearance", "system") ?: "system"
-        val initialDark = when (initialAppearance) {
-            "light" -> false
-            "dark" -> true
-            else -> (resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES
-        }
-        setTheme(if (initialDark) R.style.YovoiceTheme_Dark else R.style.YovoiceTheme_Light)
-        super.onCreate(savedInstanceState)
-        val uiPrefs = initialPrefs
+        val uiPrefs = getSharedPreferences("yovoice-ui", MODE_PRIVATE)
         themeIndex = uiPrefs.getInt("theme", 0).coerceIn(0, palettes.lastIndex)
         accentIndex = uiPrefs.getInt("accent", themeIndex).coerceIn(0, accentColors.lastIndex)
         appearanceMode = uiPrefs.getString("appearance", "system") ?: "system"
+        applyPlatformTheme()
+        super.onCreate(savedInstanceState)
         val ttsPrefs = getSharedPreferences("yovoice-tts", MODE_PRIVATE)
         val savedEngineId = ttsPrefs.getString("selected_tts_engine_id", "system") ?: "system"
         speechRate = ttsPrefs.getFloat("speech_rate:" + savedEngineId,
@@ -288,7 +299,7 @@ class MainActivity : ComponentActivity() {
                     .show()
             }
         }
-        row.addView(help, LinearLayout.LayoutParams(dp(44), dp(48)))
+        row.addView(help, LinearLayout.LayoutParams(dp(48), dp(48)))
         val settings = LineIconView(this, "settings", p.secondary).apply {
             contentDescription = "设置"
             isClickable = true
@@ -1153,6 +1164,7 @@ class MainActivity : ComponentActivity() {
                 setOnClickListener {
                     appearanceMode = mode
                     getSharedPreferences("yovoice-ui", MODE_PRIVATE).edit().putString("appearance", mode).apply()
+                    applyPlatformTheme()
                     render()
                 }
             }
@@ -1208,6 +1220,7 @@ class MainActivity : ComponentActivity() {
                 setOnClickListener {
                     accentIndex = index
                     getSharedPreferences("yovoice-ui", MODE_PRIVATE).edit().putInt("accent", index).apply()
+                    applyPlatformTheme()
                     render()
                 }
             }
@@ -1484,10 +1497,25 @@ class MainActivity : ComponentActivity() {
         addView(iconWrap, LinearLayout.LayoutParams(dp(40), dp(40)))
         val labels = LinearLayout(this@MainActivity).apply {
             orientation = LinearLayout.VERTICAL
-            addView(label(title, 13, p.text, true))
-            addView(label(subtitle, 10, p.secondary).apply { setPadding(0, dp(3), 0, 0); maxLines = 1 })
+            addView(label(title, 14, p.text, true))
         }
         addView(labels, LinearLayout.LayoutParams(0, -2, 1f).apply { leftMargin = dp(11) })
+        val help = FrameLayout(this@MainActivity).apply {
+            contentDescription = "查看功能说明"
+            isClickable = true
+            isFocusable = true
+            background = ripple(p.surface, dp(10))
+            addView(LineIconView(this@MainActivity, "info", p.secondary),
+                FrameLayout.LayoutParams(dp(18), dp(18), Gravity.CENTER))
+            setOnClickListener {
+                AlertDialog.Builder(this@MainActivity)
+                    .setTitle(title)
+                    .setMessage(subtitle)
+                    .setPositiveButton("知道了", null)
+                    .show()
+            }
+        }
+        addView(help, LinearLayout.LayoutParams(dp(48), dp(48)))
         addView(LineIconView(this@MainActivity, "chevron", p.secondary), LinearLayout.LayoutParams(dp(18), dp(18)))
     }
 
@@ -1515,7 +1543,7 @@ class MainActivity : ComponentActivity() {
                     .show()
             }
         }
-        addView(help, LinearLayout.LayoutParams(dp(40), dp(40)))
+        addView(help, LinearLayout.LayoutParams(dp(48), dp(48)))
     }
     private fun infoRow(title: String, detail: String) = TextView(this).apply {
         text = "$title\n$detail"; textSize = 14f; setTextColor(p.text); setLineSpacing(dp(3).toFloat(), 1f)
@@ -1545,7 +1573,7 @@ class MainActivity : ComponentActivity() {
                     .show()
             }
         }
-        addView(help, LinearLayout.LayoutParams(dp(44), dp(44)))
+        addView(help, LinearLayout.LayoutParams(dp(48), dp(48)))
     }
     private fun label(value: String, size: Int, color: Int, bold: Boolean = false) = TextView(this).apply {
         text = value; textSize = size.toFloat(); setTextColor(color)

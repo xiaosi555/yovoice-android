@@ -156,6 +156,7 @@ bool write_wav(
 
 extern "C" JNIEXPORT jstring JNICALL
 Java_com_xiaosi555_yovoice_NativeEngine_nativeProbe(JNIEnv* env, jobject) {
+    std::lock_guard<std::mutex> lock(g_mutex);
     std::ostringstream json;
     json << "{\"abi\":" << audiocpp_abi_version()
          << ",\"version\":\"" << json_escape(audiocpp_build_version() == nullptr ? "" : audiocpp_build_version()) << "\"";

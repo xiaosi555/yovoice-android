@@ -12,4 +12,22 @@
         <item name="android:windowLightStatusBar">false</item>
         <item name="android:windowActionModeOverlay">true</item>
     </style>
+    <style name="YovoiceAccentPaper">
+        <item name="android:colorAccent">#E0651C</item>
+    </style>
+    <style name="YovoiceAccentCoral">
+        <item name="android:colorAccent">#F08A4B</item>
+    </style>
+    <style name="YovoiceAccentLagoon">
+        <item name="android:colorAccent">#139AA2</item>
+    </style>
+    <style name="YovoiceAccentSand">
+        <item name="android:colorAccent">#C2662D</item>
+    </style>
+    <style name="YovoiceAccentSage">
+        <item name="android:colorAccent">#5E8F45</item>
+    </style>
+    <style name="YovoiceAccentAbyss">
+        <item name="android:colorAccent">#78E8EE</item>
+    </style>
 </resources>

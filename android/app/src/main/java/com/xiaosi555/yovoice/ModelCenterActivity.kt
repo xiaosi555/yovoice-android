@@ -57,7 +57,7 @@ class ModelCenterActivity : ComponentActivity() {
     private val pageBg get() = if (paletteDark) {
         if (baseThemeDark) baseBg else mixColor(baseBg, android.graphics.Color.BLACK, 0.86f)
     } else {
-        if (baseThemeDark) mixColor(baseBg, android.graphics.Color.WHITE, 0.94f) else baseBg
+        if (baseThemeDark) mixColor(baseBg, android.graphics.Color.WHITE, 0.88f) else baseBg
     }
     private val surface get() = if (paletteDark) {
         if (baseThemeDark) baseSurface else mixColor(baseSurface, android.graphics.Color.BLACK, 0.82f)
@@ -84,6 +84,15 @@ class ModelCenterActivity : ComponentActivity() {
             else -> (resources.configuration.uiMode and android.content.res.Configuration.UI_MODE_NIGHT_MASK) == android.content.res.Configuration.UI_MODE_NIGHT_YES
         }
         setTheme(if (dark) R.style.YovoiceTheme_Dark else R.style.YovoiceTheme_Light)
+        val accentStyle = when (accentIndex) {
+            0 -> R.style.YovoiceAccentPaper
+            1 -> R.style.YovoiceAccentCoral
+            2 -> R.style.YovoiceAccentLagoon
+            3 -> R.style.YovoiceAccentSand
+            4 -> R.style.YovoiceAccentSage
+            else -> R.style.YovoiceAccentAbyss
+        }
+        theme.applyStyle(accentStyle, true)
         super.onCreate(savedInstanceState)
         try {
             workManager = WorkManager.getInstance(applicationContext)
@@ -280,7 +289,7 @@ class ModelCenterActivity : ComponentActivity() {
             }, LinearLayout.LayoutParams(0, dp(44), 1f))
             val modelHelp = "主要用途：${ModelFeatureGuide.modelPurpose(model.family)}\n对应功能：${ModelFeatureGuide.featureNames(model.family)}\n\n" +
                 if (model.packageSize() >= 2L * 1024 * 1024 * 1024) "这是大型模型。下载前确认剩余存储空间；实际运行还受设备可用内存和运行时支持影响。" else "下载后仍需通过本机原生运行时和实际任务验证。"
-            addView(infoAction("模型说明", modelHelp), LinearLayout.LayoutParams(dp(44), dp(44)))
+            addView(infoAction("模型说明", modelHelp), LinearLayout.LayoutParams(dp(48), dp(48)))
         }
         card.addView(titleRow, params())
         card.addView(TextView(this).apply {
@@ -449,6 +458,11 @@ class ModelCenterActivity : ComponentActivity() {
         contentDescription = "查看$title"
         isClickable = true
         isFocusable = true
+        background = GradientDrawable().apply {
+            setColor(surface)
+            cornerRadius = dp(12).toFloat()
+            setStroke(dp(1), 0x22808080)
+        }
         addView(LineIconView(this@ModelCenterActivity, "info", secondaryText),
             FrameLayout.LayoutParams(dp(20), dp(20), Gravity.CENTER))
         setOnClickListener {
