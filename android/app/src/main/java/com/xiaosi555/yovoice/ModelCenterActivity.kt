@@ -43,6 +43,7 @@ class ModelCenterActivity : ComponentActivity() {
     @Volatile private var runtimeFamilies: Set<String> = emptySet()
     @Volatile private var runtimeReady: Boolean = false
     private val themeIndex by lazy { getSharedPreferences("yovoice-ui", MODE_PRIVATE).getInt("theme", 0).coerceIn(0, 5) }
+    private val accentIndex by lazy { getSharedPreferences("yovoice-ui", MODE_PRIVATE).getInt("accent", themeIndex).coerceIn(0, 5) }
     private val appearanceMode by lazy { getSharedPreferences("yovoice-ui", MODE_PRIVATE).getString("appearance", "system") ?: "system" }
     private val paletteDark: Boolean get() = when (appearanceMode) {
         "light" -> false
@@ -62,7 +63,7 @@ class ModelCenterActivity : ComponentActivity() {
     } else android.graphics.Color.WHITE
     private val primaryText get() = if (paletteDark) 0xFFF1F3F4.toInt() else 0xFF202124.toInt()
     private val secondaryText get() = if (paletteDark) 0xFFADB5B8.toInt() else 0xFF6F7478.toInt()
-    private val baseAccent get() = intArrayOf(0xFF18181A.toInt(),0xFFEDEDEF.toInt(),0xFF0B7A80.toInt(),0xFF9A4A24.toInt(),0xFF3B6B4C.toInt(),0xFF19C3CD.toInt())[themeIndex]
+    private val baseAccent get() = intArrayOf(0xFFE0651C.toInt(),0xFFEDEDEF.toInt(),0xFF139AA2.toInt(),0xFFC2662D.toInt(),0xFF5E8F45.toInt(),0xFFF08A4B.toInt())[accentIndex]
     private val accentColor get() = when {
         paletteDark && android.graphics.Color.luminance(baseAccent) < 0.35f -> mixColor(baseAccent, android.graphics.Color.WHITE, 0.72f)
         !paletteDark && android.graphics.Color.luminance(baseAccent) > 0.75f -> mixColor(baseAccent, android.graphics.Color.BLACK, 0.72f)

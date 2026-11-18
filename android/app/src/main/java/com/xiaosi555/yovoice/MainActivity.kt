@@ -67,6 +67,7 @@ class MainActivity : ComponentActivity() {
     private var selectedCreateFeature: String? = null
     private var activeWorkspaceFeature: String? = null
     private var themeIndex = 0
+    private var accentIndex = 0
     private var appearanceMode = "system"
     private var lastBackPressedAt = 0L
     private var nativeLoadedModelId: String? = null
@@ -118,6 +119,8 @@ class MainActivity : ComponentActivity() {
     private var midiAudioUri: Uri? = null
 
     private data class Palette(val name: String, val bg: Int, val surface: Int, val text: Int, val secondary: Int, val accent: Int, val border: Int, val dark: Boolean)
+    private val accentNames = listOf("橙色", "雾白", "海湾", "暖沙", "苔绿", "珊瑚")
+    private val accentColors = intArrayOf(0xFFE0651C.toInt(), 0xFFEDEDEF.toInt(), 0xFF139AA2.toInt(), 0xFFC2662D.toInt(), 0xFF5E8F45.toInt(), 0xFFF08A4B.toInt())
     private val palettes = listOf(
         Palette("纸白", 0xFFF7F7F7.toInt(), 0xFFFFFFFF.toInt(), 0xFF18181A.toInt(), 0xFF77777D.toInt(), 0xFF18181A.toInt(), 0x1F18181A, false),
         Palette("墨黑", 0xFF0F0F11.toInt(), 0xFF18181B.toInt(), 0xFFEDEDEF.toInt(), 0xFF99999F.toInt(), 0xFFEDEDEF.toInt(), 0x26FFFFFF, true),
@@ -133,12 +136,13 @@ class MainActivity : ComponentActivity() {
             "dark" -> true
             else -> (resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES
         }
-        if (dark == base.dark) return base
+        val selectedAccent = accentColors[accentIndex.coerceIn(accentColors.indices)]
         val accent = when {
-            dark && Color.luminance(base.accent) < 0.35f -> mixColor(base.accent, Color.WHITE, 0.72f)
-            !dark && Color.luminance(base.accent) > 0.75f -> mixColor(base.accent, Color.BLACK, 0.72f)
-            else -> base.accent
+            dark && Color.luminance(selectedAccent) < 0.35f -> mixColor(selectedAccent, Color.WHITE, 0.72f)
+            !dark && Color.luminance(selectedAccent) > 0.78f -> mixColor(selectedAccent, Color.BLACK, 0.72f)
+            else -> selectedAccent
         }
+        if (dark == base.dark) return base.copy(accent = accent)
         return if (dark) Palette(base.name, mixColor(base.bg, Color.BLACK, 0.86f),
             mixColor(base.surface, Color.BLACK, 0.82f), 0xFFF1F3F4.toInt(), 0xFFADB5B8.toInt(),
             accent, 0x33FFFFFF, true)
@@ -162,6 +166,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         val uiPrefs = getSharedPreferences("yovoice-ui", MODE_PRIVATE)
         themeIndex = uiPrefs.getInt("theme", 0).coerceIn(0, palettes.lastIndex)
+        accentIndex = uiPrefs.getInt("accent", themeIndex).coerceIn(0, accentColors.lastIndex)
         appearanceMode = uiPrefs.getString("appearance", "system") ?: "system"
         val ttsPrefs = getSharedPreferences("yovoice-tts", MODE_PRIVATE)
         val savedEngineId = ttsPrefs.getString("selected_tts_engine_id", "system") ?: "system"
@@ -1146,20 +1151,20 @@ class MainActivity : ComponentActivity() {
             modeRow.addView(chip, LinearLayout.LayoutParams(0, dp(48), 1f).apply { if (mode != "system") leftMargin = dp(7) })
         }
         body.addView(modeRow, marginTop(9))
-        body.addView(label("主题颜色", 17, p.text, true), marginTop(20))
-        val themeGrid = GridLayout(this).apply { columnCount = 3; useDefaultMargins = false }
+        body.addView(label("界面风格", 17, p.text, true), marginTop(20))
+        val styleGrid = GridLayout(this).apply { columnCount = 3; useDefaultMargins = false }
         palettes.forEachIndexed { index, palette ->
             val item = LinearLayout(this).apply {
                 orientation = LinearLayout.HORIZONTAL
                 gravity = Gravity.CENTER
                 setPadding(dp(4), dp(8), dp(4), dp(8))
-                background = shape(palette.surface, dp(12), palette.border, dp(1))
-                val swatch = View(this@MainActivity).apply { background = shape(palette.accent, dp(8)) }
-                addView(swatch, LinearLayout.LayoutParams(dp(16), dp(16)))
+                background = shape(palette.surface, dp(12), if (themeIndex == index) p.accent else palette.border, dp(1))
+                val swatch = View(this@MainActivity).apply { background = shape(palette.bg, dp(5), palette.border, dp(1)) }
+                addView(swatch, LinearLayout.LayoutParams(dp(18), dp(18)))
                 addView(TextView(this@MainActivity).apply {
                     text = (if (themeIndex == index) "✓ " else "") + palette.name
                     textSize = 12f
-                    setTextColor(palette.text)
+                    setTextColor(p.text)
                     setPadding(dp(5), 0, 0, 0)
                 })
                 setOnClickListener {
@@ -1168,13 +1173,43 @@ class MainActivity : ComponentActivity() {
                     render()
                 }
             }
-            themeGrid.addView(item, GridLayout.LayoutParams(GridLayout.spec(index / 3, 1f), GridLayout.spec(index % 3, 1f)).apply {
+            styleGrid.addView(item, GridLayout.LayoutParams(GridLayout.spec(index / 3, 1f), GridLayout.spec(index % 3, 1f)).apply {
                 width = 0
                 height = dp(48)
                 setMargins(dp(3), dp(4), dp(3), dp(4))
             })
         }
-        body.addView(themeGrid, marginTop(10))
+        body.addView(styleGrid, marginTop(10))
+        body.addView(label("主题颜色", 17, p.text, true), marginTop(18))
+        val accentGrid = GridLayout(this).apply { columnCount = 3; useDefaultMargins = false }
+        accentNames.forEachIndexed { index, name ->
+            val item = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER
+                setPadding(dp(4), dp(8), dp(4), dp(8))
+                background = shape(p.surface, dp(12), if (accentIndex == index) p.accent else p.border, dp(1))
+                addView(View(this@MainActivity).apply {
+                    background = shape(accentColors[index], dp(8))
+                }, LinearLayout.LayoutParams(dp(16), dp(16)))
+                addView(TextView(this@MainActivity).apply {
+                    text = (if (accentIndex == index) "✓ " else "") + name
+                    textSize = 12f
+                    setTextColor(p.text)
+                    setPadding(dp(5), 0, 0, 0)
+                })
+                setOnClickListener {
+                    accentIndex = index
+                    getSharedPreferences("yovoice-ui", MODE_PRIVATE).edit().putInt("accent", index).apply()
+                    render()
+                }
+            }
+            accentGrid.addView(item, GridLayout.LayoutParams(GridLayout.spec(index / 3, 1f), GridLayout.spec(index % 3, 1f)).apply {
+                width = 0
+                height = dp(48)
+                setMargins(dp(3), dp(4), dp(3), dp(4))
+            })
+        }
+        body.addView(accentGrid, marginTop(10))
         body.addView(label("语音引擎", 17, p.text, true), marginTop(24))
         body.addView(infoRow("手机系统 TTS", if (ttsReady) "已就绪" else "未就绪或正在检测"), marginTop(8))
         body.addView(secondaryButton("选择语音引擎 / 打开系统语音设置") { showTtsOptions() }, marginTop(8))
