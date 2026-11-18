@@ -22,7 +22,6 @@ import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.drawable.Drawable
 import android.content.ActivityNotFoundException
-import android.speech.tts.TextToSpeech
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
@@ -205,7 +204,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         nav.removeAllViews()
         listOf("⌂" to "工作室", "♫" to "创作", "▦" to "模型", "⚙" to "设置").forEachIndexed { index, pair ->
             val item = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER; setOnClickListener { page = index; render() } }
-            item.addView(label(pair.first, 20, if (page == index) p.accent else p.secondary, true).apply { gravity = Gravity.CENTER })
+            item.addView(LineIconView(this, arrayOf("home", "wave", "grid", "settings")[index], if (page == index) p.accent else p.secondary), LinearLayout.LayoutParams(dp(24), dp(24)))
             item.addView(label(pair.second, 11, if (page == index) p.accent else p.secondary, page == index).apply { gravity = Gravity.CENTER; setPadding(0, dp(2), 0, 0) })
             nav.addView(item, LinearLayout.LayoutParams(0, -1, 1f))
         }
