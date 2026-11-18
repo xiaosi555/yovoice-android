@@ -16,6 +16,7 @@ import android.widget.Button
 import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.GridLayout
+import android.widget.FrameLayout
 import android.widget.Spinner
 import android.widget.ArrayAdapter
 import android.widget.SeekBar
@@ -149,8 +150,13 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         brand.addView(label(title, 27, p.text, true))
         brand.addView(label(subtitle, 13, p.secondary).apply { setPadding(0, dp(4), 0, 0) })
         row.addView(brand, LinearLayout.LayoutParams(0, -2, 1f))
-        val settings = textButton("设置", 14) { page = 3; render() }
-        row.addView(settings, LinearLayout.LayoutParams(dp(48), dp(48)))
+        val settings = LineIconView(this, "settings", p.secondary).apply {
+            contentDescription = "设置"
+            isClickable = true
+            isFocusable = true
+            setOnClickListener { page = 3; render() }
+        }
+        row.addView(settings, LinearLayout.LayoutParams(dp(44), dp(44)))
         body.addView(row)
     }
 
@@ -249,33 +255,65 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     }
 
     private fun renderCreateGrid() {
-        renderHeader("创作工坊", "选择一个功能开始创作")
-        body.addView(label("创作功能", 17, p.text, true), marginTop(18))
-        val grid = GridLayout(this).apply { columnCount = 2; useDefaultMargins = false }
+        renderHeader("创作", "选择工具开始制作")
+        val grid = GridLayout(this).apply { columnCount = 3; useDefaultMargins = false }
         ModelFeatureGuide.features.forEachIndexed { index, feature ->
             val tile = LinearLayout(this).apply {
-                orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER_VERTICAL
-                setPadding(dp(15), dp(16), dp(15), dp(16))
-                background = shape(p.surface, dp(16), p.border, dp(1))
-                isClickable = true; isFocusable = true
+                orientation = LinearLayout.VERTICAL
+                gravity = Gravity.CENTER
+                setPadding(dp(4), dp(7), dp(4), dp(6))
+                background = shape(p.surface, dp(15), p.border, dp(1))
+                isClickable = true
+                isFocusable = true
+                contentDescription = "${feature.name}，${feature.shortDescription}"
                 setOnClickListener { selectedCreateFeature = feature.id; render() }
-                addView(label(feature.symbol, 25, p.accent, true))
-                addView(label(feature.name, 15, p.text, true).apply { setPadding(0, dp(9), 0, 0) })
-                addView(label(feature.shortDescription, 11, p.secondary).apply { setPadding(0, dp(5), 0, 0); maxLines = 2 })
+                val iconWrap = FrameLayout(this@MainActivity).apply {
+                    background = shape(Color.argb(if (p.dark) 38 else 22, Color.red(p.accent), Color.green(p.accent), Color.blue(p.accent)), dp(17))
+                    addView(LineIconView(this@MainActivity, featureIcon(feature.id), p.accent), FrameLayout.LayoutParams(dp(30), dp(30), Gravity.CENTER))
+                }
+                addView(iconWrap, LinearLayout.LayoutParams(dp(48), dp(48)))
+                addView(label(feature.name, 11, p.text, true).apply {
+                    gravity = Gravity.CENTER
+                    maxLines = 1
+                    setPadding(0, dp(6), 0, 0)
+                })
             }
-            grid.addView(tile, GridLayout.LayoutParams(GridLayout.spec(index / 2, 1f), GridLayout.spec(index % 2, 1f)).apply {
-                width = 0; height = dp(126); setMargins(dp(4), dp(4), dp(4), dp(4))
+            grid.addView(tile, GridLayout.LayoutParams(
+                GridLayout.spec(index / 3, 1f), GridLayout.spec(index % 3, 1f)
+            ).apply {
+                width = 0
+                height = dp(94)
+                setMargins(dp(3), dp(3), dp(3), dp(3))
             })
         }
-        body.addView(grid, marginTop(8))
-        body.addView(toolRow("模型库", "按功能查看模型用途、文件大小和下载状态") { page = 2; render() }, marginTop(14))
+        body.addView(grid, marginTop(12))
+        body.addView(iconListRow("models", "模型库", "查看模型用途、适配功能与下载状态") {
+            page = 2
+            render()
+        }, marginTop(12))
+    }
+
+    private fun featureIcon(id: String): String = when (id) {
+        "tts" -> "tts"
+        "clone" -> "clone"
+        "story" -> "story"
+        "asr" -> "asr"
+        "music" -> "music"
+        "stems" -> "stems"
+        "midi" -> "midi"
+        "assistant" -> "assistant"
+        "audio-import" -> "import"
+        else -> "wave"
     }
 
     private fun renderCreateFeature(featureId: String) {
         val feature = ModelFeatureGuide.features.firstOrNull { it.id == featureId }
         if (feature == null) { selectedCreateFeature = null; renderCreateGrid(); return }
         renderHeader(feature.name, feature.description)
-        body.addView(textButton("‹ 返回创作功能", 13) { selectedCreateFeature = null; render() }, marginTop(8))
+        body.addView(iconListRow("back", "返回创作", "切换其他创作工具") {
+            selectedCreateFeature = null
+            render()
+        }, marginTop(8))
         body.addView(label("功能说明", 16, p.text, true), marginTop(18))
         body.addView(label(feature.purpose, 13, p.secondary).apply { setLineSpacing(dp(4).toFloat(), 1f) }, marginTop(7))
         body.addView(label("推荐模型（按下载体积从小到大）", 16, p.text, true), marginTop(22))
@@ -306,7 +344,10 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         body.removeAllViews()
         val workspaceFeature = activeWorkspaceFeature
         renderHeader("创作 · ${ModelFeatureGuide.features.firstOrNull { it.id == workspaceFeature }?.name ?: "工具"}", "当前功能的独立操作界面")
-        body.addView(textButton("‹ 返回功能说明", 13) { activeWorkspaceFeature = null; render() }, marginTop(8))
+        body.addView(iconListRow("back", "返回功能", "返回功能说明与模型推荐") {
+            activeWorkspaceFeature = null
+            render()
+        }, marginTop(8))
         if (workspaceFeature == null || workspaceFeature == "assistant") {
         val assistantPanel = card()
         assistantPanel.addView(section("AI 创作助手", "使用你配置的兼容服务，辅助润色、扩写、分镜和提示词"))
@@ -778,6 +819,29 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             item.addView(label(pair.second, 11, if (page == targetPage) p.accent else p.secondary, page == targetPage).apply { gravity = Gravity.CENTER; setPadding(0, dp(2), 0, 0) })
             nav.addView(item, LinearLayout.LayoutParams(0, -1, 1f))
         }
+    }
+
+    private fun iconListRow(icon: String, title: String, subtitle: String, action: () -> Unit) = LinearLayout(this).apply {
+        orientation = LinearLayout.HORIZONTAL
+        gravity = Gravity.CENTER_VERTICAL
+        setPadding(dp(13), dp(10), dp(12), dp(10))
+        background = shape(p.surface, dp(14), p.border, dp(1))
+        isClickable = true
+        isFocusable = true
+        contentDescription = title
+        setOnClickListener { action() }
+        val iconWrap = FrameLayout(this@MainActivity).apply {
+            background = shape(Color.argb(if (p.dark) 38 else 22, Color.red(p.accent), Color.green(p.accent), Color.blue(p.accent)), dp(12))
+            addView(LineIconView(this@MainActivity, icon, p.accent), FrameLayout.LayoutParams(dp(23), dp(23), Gravity.CENTER))
+        }
+        addView(iconWrap, LinearLayout.LayoutParams(dp(40), dp(40)))
+        val labels = LinearLayout(this@MainActivity).apply {
+            orientation = LinearLayout.VERTICAL
+            addView(label(title, 13, p.text, true))
+            addView(label(subtitle, 10, p.secondary).apply { setPadding(0, dp(3), 0, 0); maxLines = 1 })
+        }
+        addView(labels, LinearLayout.LayoutParams(0, -2, 1f).apply { leftMargin = dp(11) })
+        addView(LineIconView(this@MainActivity, "chevron", p.secondary), LinearLayout.LayoutParams(dp(18), dp(18)))
     }
 
     private fun card() = LinearLayout(this).apply {
