@@ -256,7 +256,8 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
 
     private fun renderCreateGrid() {
         renderHeader("创作", "选择工具开始制作")
-        val grid = GridLayout(this).apply { columnCount = 3; useDefaultMargins = false }
+        val columns = if (resources.configuration.screenWidthDp < 360) 2 else 3
+        val grid = GridLayout(this).apply { columnCount = columns; useDefaultMargins = false }
         ModelFeatureGuide.features.forEachIndexed { index, feature ->
             val tile = LinearLayout(this).apply {
                 orientation = LinearLayout.VERTICAL
@@ -279,7 +280,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                 })
             }
             grid.addView(tile, GridLayout.LayoutParams(
-                GridLayout.spec(index / 3, 1f), GridLayout.spec(index % 3, 1f)
+                GridLayout.spec(index / columns, 1f), GridLayout.spec(index % columns, 1f)
             ).apply {
                 width = 0
                 height = dp(94)
@@ -324,7 +325,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             item.addView(label(model.name, 14, p.text, true))
             item.addView(label("${model.family} · ${model.precision} · ${model.formattedSize()}", 11, p.secondary).apply { setPadding(0, dp(4), 0, 0) })
             item.addView(label(ModelFeatureGuide.modelPurpose(model.family), 12, p.secondary).apply { setPadding(0, dp(6), 0, 0) })
-            item.addView(textButton("在模型库查看 / 下载", 12) {
+            item.addView(iconListRow("download", "查看模型", "进入模型库下载，并查看安装与运行支持状态") {
                 try { startActivity(Intent(this, ModelCenterActivity::class.java).putExtra("focus_family", model.family)) }
                 catch (error: Throwable) { Toast.makeText(this, "模型库打开失败：${error.localizedMessage}", Toast.LENGTH_LONG).show() }
             }, marginTop(5))
