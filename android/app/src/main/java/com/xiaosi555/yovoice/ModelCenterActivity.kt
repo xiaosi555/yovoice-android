@@ -1,6 +1,7 @@
 package com.xiaosi555.yovoice
 
 import android.os.Bundle
+import android.app.AlertDialog
 import android.content.Intent
 import android.content.res.ColorStateList
 import android.graphics.drawable.GradientDrawable
@@ -63,7 +64,7 @@ class ModelCenterActivity : ComponentActivity() {
     } else android.graphics.Color.WHITE
     private val primaryText get() = if (paletteDark) 0xFFF1F3F4.toInt() else 0xFF202124.toInt()
     private val secondaryText get() = if (paletteDark) 0xFFADB5B8.toInt() else 0xFF6F7478.toInt()
-    private val baseAccent get() = intArrayOf(0xFFE0651C.toInt(),0xFFEDEDEF.toInt(),0xFF139AA2.toInt(),0xFFC2662D.toInt(),0xFF5E8F45.toInt(),0xFFF08A4B.toInt())[accentIndex]
+    private val baseAccent get() = intArrayOf(0xFFE0651C.toInt(),0xFFF08A4B.toInt(),0xFF139AA2.toInt(),0xFFC2662D.toInt(),0xFF5E8F45.toInt(),0xFF78E8EE.toInt())[accentIndex]
     private val accentColor get() = when {
         paletteDark && android.graphics.Color.luminance(baseAccent) < 0.35f -> mixColor(baseAccent, android.graphics.Color.WHITE, 0.72f)
         !paletteDark && android.graphics.Color.luminance(baseAccent) > 0.75f -> mixColor(baseAccent, android.graphics.Color.BLACK, 0.72f)
@@ -135,17 +136,24 @@ class ModelCenterActivity : ComponentActivity() {
             view.setPadding(dp(18) + bars.left, dp(18) + bars.top, dp(18) + bars.right, dp(18) + bars.bottom)
             insets
         }
-        root.addView(TextView(this).apply {
-            text = "模型中心"
-            textSize = 26f
-            setTextColor(primaryText)
+        val header = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-        }, params())
+            addView(TextView(this@ModelCenterActivity).apply {
+                text = "模型中心"
+                textSize = 26f
+                setTextColor(primaryText)
+                gravity = Gravity.CENTER_VERTICAL
+            }, LinearLayout.LayoutParams(0, dp(48), 1f))
+            addView(infoAction("模型中心说明",
+                "模型下载只负责获取文件并校验 SHA-256。下载完成不代表本机推理已验证；只有当前 Android 原生引擎支持的模型家族，才会开放对应功能入口。"), LinearLayout.LayoutParams(dp(48), dp(48)))
+        }
+        root.addView(header, params())
         root.addView(TextView(this).apply {
-            text = "模型目录来自 Yovoice 上游，共 ${ModelCatalog.load(this@ModelCenterActivity).size} 个模型条目。点击下载后保存到手机本地。"
-            textSize = 13f
+            text = "${ModelCatalog.load(this@ModelCenterActivity).size} 个模型 · 下载后自动校验"
+            textSize = 12f
             setTextColor(secondaryText)
-            setPadding(0, dp(5), 0, dp(12))
+            setPadding(0, dp(2), 0, dp(8))
         }, params())
 
         sourcePicker = Spinner(this).apply {
@@ -162,17 +170,12 @@ class ModelCenterActivity : ComponentActivity() {
         }, params())
         root.addView(sourcePicker, params())
 
-        root.addView(TextView(this).apply {
-            text = if (runtimeReady) {
-                "说明：下载完成会逐文件校验大小和 SHA-256。当前原生引擎实际编入的模型家族：${runtimeFamilies.joinToString().ifBlank { "暂无" }}。目录中的其他模型可以下载保存，但尚未编入本机推理库，不能视为可运行。大模型可能超过手机可用存储或运行内存。"
-            } else {
-                "说明：当前 Android 原生推理库尚未成功初始化。模型下载仍会校验文件，但在引擎可用前不能进行本地推理。大模型可能超过手机可用存储或运行内存。"
-            }
-            textSize = 12f
-            setTextColor(0xFF8A5B26.toInt())
-            setPadding(dp(12), dp(10), dp(12), dp(10))
-            setBackgroundColor(0xFFFFF2DD.toInt())
-        }, params().apply { topMargin = dp(10); bottomMargin = dp(10) })
+        val runtimeExplanation = if (runtimeReady) {
+            "当前原生引擎支持的模型家族：${runtimeFamilies.joinToString().ifBlank { "暂无" }}。其他模型可以下载保存，但尚不能在本机推理。下载前请确认存储空间；模型能否运行还取决于设备内存和实际任务测试。"
+        } else {
+            "当前 Android 原生推理引擎尚未成功初始化。模型下载仍会执行文件校验，但引擎可用前不能进行本地推理。"
+        }
+        root.addView(infoRow("设备兼容与空间要求", runtimeExplanation), params().apply { topMargin = dp(4); bottomMargin = dp(8) })
 
         val models = ModelCatalog.load(this)
         val search = EditText(this).apply {
@@ -267,37 +270,24 @@ class ModelCenterActivity : ComponentActivity() {
             setPadding(dp(12))
             background = GradientDrawable().apply { setColor(surface); cornerRadius = dp(14).toFloat(); setStroke(dp(1), 0x22808080) }
         }
-        card.addView(TextView(this).apply {
-            text = model.name
-            textSize = 17f
-            setTextColor(primaryText)
-        }, params())
+        val titleRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            addView(TextView(this@ModelCenterActivity).apply {
+                text = model.name
+                textSize = 16f
+                setTextColor(primaryText)
+            }, LinearLayout.LayoutParams(0, dp(44), 1f))
+            val modelHelp = "主要用途：${ModelFeatureGuide.modelPurpose(model.family)}\n对应功能：${ModelFeatureGuide.featureNames(model.family)}\n\n" +
+                if (model.packageSize() >= 2L * 1024 * 1024 * 1024) "这是大型模型。下载前确认剩余存储空间；实际运行还受设备可用内存和运行时支持影响。" else "下载后仍需通过本机原生运行时和实际任务验证。"
+            addView(infoAction("模型说明", modelHelp), LinearLayout.LayoutParams(dp(44), dp(44)))
+        }
+        card.addView(titleRow, params())
         card.addView(TextView(this).apply {
             text = "${model.family} · ${model.version} · ${model.precision} · ${model.formattedSize()} · ${model.packageFiles().size} 个文件"
             textSize = 12f
             setTextColor(secondaryText)
-            setPadding(0, dp(4), 0, dp(4))
-        }, params())
-        card.addView(TextView(this).apply {
-            text = "主要用途：${ModelFeatureGuide.modelPurpose(model.family)}"
-            textSize = 12f
-            setTextColor(primaryText)
-            setPadding(0, dp(5), 0, dp(3))
-        }, params())
-        card.addView(TextView(this).apply {
-            text = "对应功能：${ModelFeatureGuide.featureNames(model.family)}"
-            textSize = 11f
-            setTextColor(secondaryText)
             setPadding(0, dp(2), 0, dp(4))
-        }, params())
-        card.addView(TextView(this).apply {
-            text = if (model.packageSize() >= 2L * 1024 * 1024 * 1024) {
-                "大模型：下载前请确认手机剩余空间；能否推理取决于设备内存与 Android 后端适配。"
-            } else {
-                "下载后仍需 Android 推理引擎支持，暂未标记为已验证可运行。"
-            }
-            textSize = 11f
-            setTextColor(secondaryText)
         }, params())
 
         val status = TextView(this).apply {
@@ -442,6 +432,32 @@ class ModelCenterActivity : ComponentActivity() {
         refreshInstalled()
         updateActions()
         return card
+    }
+
+    private fun infoRow(title: String, message: String): LinearLayout = LinearLayout(this).apply {
+        orientation = LinearLayout.HORIZONTAL
+        gravity = Gravity.CENTER_VERTICAL
+        addView(TextView(this@ModelCenterActivity).apply {
+            text = title
+            textSize = 12f
+            setTextColor(secondaryText)
+        }, LinearLayout.LayoutParams(0, dp(44), 1f))
+        addView(infoAction(title, message), LinearLayout.LayoutParams(dp(44), dp(44)))
+    }
+
+    private fun infoAction(title: String, message: String): FrameLayout = FrameLayout(this).apply {
+        contentDescription = "查看$title"
+        isClickable = true
+        isFocusable = true
+        addView(LineIconView(this@ModelCenterActivity, "info", secondaryText),
+            FrameLayout.LayoutParams(dp(20), dp(20), Gravity.CENTER))
+        setOnClickListener {
+            AlertDialog.Builder(this@ModelCenterActivity)
+                .setTitle(title)
+                .setMessage(message)
+                .setPositiveButton("知道了", null)
+                .show()
+        }
     }
 
     private fun iconActionButton(icon: String, description: String): FrameLayout = FrameLayout(this).apply {

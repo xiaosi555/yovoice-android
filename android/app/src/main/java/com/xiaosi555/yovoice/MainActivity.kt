@@ -119,8 +119,8 @@ class MainActivity : ComponentActivity() {
     private var midiAudioUri: Uri? = null
 
     private data class Palette(val name: String, val bg: Int, val surface: Int, val text: Int, val secondary: Int, val accent: Int, val border: Int, val dark: Boolean)
-    private val accentNames = listOf("橙色", "雾白", "海湾", "暖沙", "苔绿", "珊瑚")
-    private val accentColors = intArrayOf(0xFFE0651C.toInt(), 0xFFEDEDEF.toInt(), 0xFF139AA2.toInt(), 0xFFC2662D.toInt(), 0xFF5E8F45.toInt(), 0xFFF08A4B.toInt())
+    private val accentNames = listOf("纸橙", "珊瑚", "海湾", "暖沙", "苔绿", "浅青")
+    private val accentColors = intArrayOf(0xFFE0651C.toInt(), 0xFFF08A4B.toInt(), 0xFF139AA2.toInt(), 0xFFC2662D.toInt(), 0xFF5E8F45.toInt(), 0xFF78E8EE.toInt())
     private val palettes = listOf(
         Palette("纸白", 0xFFF7F7F7.toInt(), 0xFFFFFFFF.toInt(), 0xFF18181A.toInt(), 0xFF77777D.toInt(), 0xFF18181A.toInt(), 0x1F18181A, false),
         Palette("墨黑", 0xFF0F0F11.toInt(), 0xFF18181B.toInt(), 0xFFEDEDEF.toInt(), 0xFF99999F.toInt(), 0xFFEDEDEF.toInt(), 0x26FFFFFF, true),
