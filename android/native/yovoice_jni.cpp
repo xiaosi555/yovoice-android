@@ -205,7 +205,7 @@ Java_com_xiaosi555_yovoice_NativeEngine_nativeLoadModel(
     if (path.get()[0] == '\0' || family_name.get()[0] == '\0') {
         return make_string(env, failure_json("模型路径或模型家族为空"));
     }
-    if ((task_value != "tts" && task_value != "asr") || mode_value != "offline") {
+    if ((task_value != "tts" && task_value != "asr" && task_value != "clon") || mode_value != "offline") {
         return make_string(env, failure_json("当前 Android 原生运行时仅开放离线 TTS 与 ASR"));
     }
 
@@ -346,6 +346,80 @@ Java_com_xiaosi555_yovoice_NativeEngine_nativeSynthesize(
          << ",\"sampleRate\":" << sample_rate
          << ",\"channels\":" << channels
          << ",\"styleControlsApplied\":" << (style_controls_applied ? "true" : "false") << "}";
+    return make_string(env, json.str());
+}
+
+extern "C" JNIEXPORT jstring JNICALL
+Java_com_xiaosi555_yovoice_NativeEngine_nativeClone(
+    JNIEnv* env, jobject, jstring text, jstring reference_text, jfloatArray reference_pcm,
+    jint sample_rate, jint channels, jstring output_path
+) {
+    UtfChars input_text(env, text);
+    UtfChars transcript(env, reference_text);
+    UtfChars output(env, output_path);
+    if (input_text.get()[0] == '\0' || transcript.get()[0] == '\0' ||
+        reference_pcm == nullptr || output.get()[0] == '\0' ||
+        sample_rate <= 0 || channels <= 0) {
+        return make_string(env, failure_json("克隆文本、参考音频、参考转录或输出路径无效"));
+    }
+    const jsize sample_count = env->GetArrayLength(reference_pcm);
+    if (sample_count <= 0 || sample_count > 4800000 || sample_count % channels != 0) {
+        return make_string(env, failure_json("参考音频无效或超过 5 分钟限制"));
+    }
+    jfloat* samples = env->GetFloatArrayElements(reference_pcm, nullptr);
+    if (samples == nullptr) return make_string(env, failure_json("无法读取参考音频 PCM"));
+    std::lock_guard<std::mutex> lock(g_mutex);
+    if (g_state.session == nullptr || g_state.task != "clon") {
+        env->ReleaseFloatArrayElements(reference_pcm, samples, JNI_ABORT);
+        return make_string(env, failure_json("请先加载支持声音克隆的模型"));
+    }
+    audiocpp_request* request = audiocpp_request_create();
+    if (request == nullptr) {
+        env->ReleaseFloatArrayElements(reference_pcm, samples, JNI_ABORT);
+        return make_string(env, failure_json("无法创建声音克隆请求"));
+    }
+    audiocpp_status status = audiocpp_request_set_text(request, input_text.get(), nullptr);
+    if (status == AUDIOCPP_OK) {
+        status = audiocpp_request_set_voice_audio(
+            request, samples, static_cast<size_t>(sample_count) / static_cast<size_t>(channels),
+            sample_rate, channels);
+    }
+    env->ReleaseFloatArrayElements(reference_pcm, samples, JNI_ABORT);
+    if (status == AUDIOCPP_OK) {
+        status = audiocpp_request_set_option(request, "reference_text", transcript.get());
+    }
+    if (status != AUDIOCPP_OK) {
+        const std::string message = status_message(status);
+        audiocpp_request_free(request);
+        return make_string(env, failure_json(message));
+    }
+    audiocpp_result* result = nullptr;
+    status = audiocpp_session_run(g_state.session, request, &result);
+    audiocpp_request_free(request);
+    if (status != AUDIOCPP_OK || result == nullptr) {
+        const std::string message = status_message(status);
+        if (result != nullptr) audiocpp_result_free(result);
+        return make_string(env, failure_json(message));
+    }
+    const float* samples_out = nullptr;
+    size_t frames = 0;
+    int sample_rate_out = 0;
+    int channels_out = 0;
+    status = audiocpp_result_audio(result, &samples_out, &frames, &sample_rate_out, &channels_out);
+    if (status != AUDIOCPP_OK) {
+        const std::string message = status_message(status);
+        audiocpp_result_free(result);
+        return make_string(env, failure_json(message));
+    }
+    std::string write_error;
+    const bool written = write_wav(
+        output.get(), samples_out, frames, sample_rate_out, channels_out, &write_error);
+    audiocpp_result_free(result);
+    if (!written) return make_string(env, failure_json(write_error));
+    std::ostringstream json;
+    json << "{\"ok\":true,\"path\":\"" << json_escape(output.get())
+         << "\",\"frames\":" << frames << ",\"sampleRate\":" << sample_rate_out
+         << ",\"channels\":" << channels_out << "}";
     return make_string(env, json.str());
 }
 
