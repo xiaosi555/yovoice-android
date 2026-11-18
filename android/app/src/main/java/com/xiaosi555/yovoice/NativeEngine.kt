@@ -25,11 +25,16 @@ object NativeEngine {
             nativeLoadModel(path, family, threads)
         }.getOrElse { errorJson(it) }
 
-    fun synthesize(text: String, language: String, outputPath: String): String =
-        runCatching {
-            ensureLoaded()
-            nativeSynthesize(text, language, outputPath)
-        }.getOrElse { errorJson(it) }
+    fun synthesize(
+        text: String,
+        language: String,
+        outputPath: String,
+        speakingRate: Float = 1.0f,
+        pitchMultiplier: Float = 1.0f
+    ): String = runCatching {
+        ensureLoaded()
+        nativeSynthesize(text, language, outputPath, speakingRate, pitchMultiplier)
+    }.getOrElse { errorJson(it) }
 
     fun unload() {
         runCatching {
@@ -47,6 +52,6 @@ object NativeEngine {
 
     private external fun nativeProbe(): String
     private external fun nativeLoadModel(path: String, family: String, threads: Int): String
-    private external fun nativeSynthesize(text: String, language: String, outputPath: String): String
+    private external fun nativeSynthesize(text: String, language: String, outputPath: String, speakingRate: Float, pitchMultiplier: Float): String
     private external fun nativeUnload()
 }
