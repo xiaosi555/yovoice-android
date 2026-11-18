@@ -7,6 +7,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
 import java.io.FileOutputStream
+import java.io.ByteArrayOutputStream
 import java.util.Locale
 import java.util.zip.ZipFile
 
@@ -25,7 +26,6 @@ data class MultiTtsSpeaker(
 /** Imports only a user-selected MultiTTS ZIP; no device-wide file scanning is performed. */
 object MultiTtsPackageImporter {
     private const val PREFS = "yovoice-multitts"
-    private const val MAX_ARCHIVE_BYTES = 1024L * 1024L * 1024L
 
     data class ImportedPackage(
         val uri: String,
@@ -41,12 +41,18 @@ object MultiTtsPackageImporter {
         val resolver = context.contentResolver
         val metadata = readMetadata(context, uri)
         val metaSize = metadata.fileSize
-        require(metaSize <= MAX_ARCHIVE_BYTES || metaSize < 0L) { "音色包超过 1 GB，暂不支持导入" }
         val cacheRoot = File(context.cacheDir, "multitts-import").apply {
             if (!exists() && !mkdirs()) error("无法创建导入缓存目录")
         }
         val stat = StatFs(cacheRoot.absolutePath)
-        require(metaSize < 0L || stat.availableBytes > metaSize + 8L * 1024L * 1024L) { "手机可用空间不足，无法临时读取音色包" }
+        val availableBeforeCopy = stat.availableBytes
+        val reserveBytes = 16L * 1024L * 1024L
+        require(metaSize < 0L || availableBeforeCopy > metaSize + reserveBytes) {
+            "手机可用空间不足，无法临时读取音色包"
+        }
+        // Do not impose an arbitrary 1 GB package ceiling. When the document provider
+        // cannot report a size, cap the copy to currently available space minus a reserve.
+        val copyLimit = if (metaSize >= 0L) metaSize else (availableBeforeCopy - reserveBytes).coerceAtLeast(0L)
         val archive = File(cacheRoot, "selected-package.zip")
         try {
             resolver.openInputStream(uri)?.use { input ->
@@ -57,7 +63,7 @@ object MultiTtsPackageImporter {
                         val n = input.read(buffer)
                         if (n < 0) break
                         copied += n
-                        require(copied <= MAX_ARCHIVE_BYTES) { "音色包超过 1 GB，暂不支持导入" }
+                        require(copied <= copyLimit) { "音色包大小超过可用临时空间，已安全停止导入" }
                         output.write(buffer, 0, n)
                     }
                     output.fd.sync()
@@ -65,21 +71,24 @@ object MultiTtsPackageImporter {
             } ?: error("无法读取所选音色包")
             ZipFile(archive).use { zip ->
                 val entries = zip.entries().asSequence().toList()
-                val configEntry = entries.firstOrNull { it.name.substringAfterLast('/') == "config.yaml" }
-                    ?: error("压缩包根目录或子目录中缺少 config.yaml")
-                val enginesEntry = entries.firstOrNull { it.name.substringAfterLast('/') == "engines.yaml" }
-                    ?: error("压缩包中缺少 engines.yaml")
-                val config = zip.getInputStream(configEntry).bufferedReader(Charsets.UTF_8).use { it.readText() }
-                val engines = zip.getInputStream(enginesEntry).bufferedReader(Charsets.UTF_8).use { it.readText() }
+                val configEntry = entries.firstOrNull { it.name == "config.yaml" }
+                    ?: error("压缩包根目录缺少 config.yaml")
+                val enginesEntry = entries.firstOrNull { it.name == "engines.yaml" }
+                    ?: error("压缩包根目录缺少 engines.yaml")
+                val config = readZipText(zip, configEntry, 4 * 1024 * 1024)
+                val engines = readZipText(zip, enginesEntry, 2 * 1024 * 1024)
                 val datPaths = entries.map { it.name.replace('\\', '/') }
                     .filter {
                         (it.startsWith("isstts/xTTSRes/") || it.contains("/isstts/xTTSRes/")) &&
                             it.endsWith(".voc.dat", true)
                     }
-                val descTexts = entries.filter { it.name.endsWith(".desc", true) }.associate { entry ->
-                    val key = normalize(entry.name.substringAfterLast('/').removeSuffix(".desc"))
-                    key to zip.getInputStream(entry).bufferedReader(Charsets.UTF_8).use { it.readText().take(16_384) }
-                }
+                val descTexts = entries.asSequence()
+                    .filter { it.name.endsWith(".desc", true) }
+                    .take(1024)
+                    .associate { entry ->
+                        val key = normalize(entry.name.substringAfterLast('/').removeSuffix(".desc"))
+                        key to zip.getInputStream(entry).use { readZipText(it, 16_384, truncate = true) }
+                    }
                 val engineMap = parseEngineNames(engines)
                 val parsed = parseSpeakers(config, datPaths, descTexts)
                 require(parsed.isNotEmpty()) { "config.yaml 中没有找到可识别的 Speaker 音色条目" }
@@ -189,7 +198,7 @@ object MultiTtsPackageImporter {
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putString("index", json.toString()).apply()
     }
 
-    private fun parseEngineNames(yaml: String): Map<String, String> {
+    internal fun parseEngineNames(yaml: String): Map<String, String> {
         val result = linkedMapOf<String, String>()
         var code: String? = null
         yaml.lineSequence().forEach { line ->
@@ -248,6 +257,30 @@ object MultiTtsPackageImporter {
         }
         flush()
         return result
+    }
+
+
+    private fun readZipText(zip: ZipFile, entry: java.util.zip.ZipEntry, maxBytes: Int): String =
+        zip.getInputStream(entry).use { readZipText(it, maxBytes) }
+
+    private fun readZipText(
+        input: java.io.InputStream,
+        maxBytes: Int,
+        truncate: Boolean = false
+    ): String {
+        val output = ByteArrayOutputStream(minOf(maxBytes, 64 * 1024))
+        val buffer = ByteArray(8 * 1024)
+        var total = 0
+        while (total < maxBytes) {
+            val count = input.read(buffer, 0, minOf(buffer.size, maxBytes - total))
+            if (count < 0) break
+            output.write(buffer, 0, count)
+            total += count
+        }
+        if (!truncate && input.read() >= 0) {
+            error("音色包中的 YAML 文件超过允许大小（${maxBytes / 1024} KB）")
+        }
+        return String(output.toByteArray(), Charsets.UTF_8)
     }
 
     private fun scalar(raw: String): String {
