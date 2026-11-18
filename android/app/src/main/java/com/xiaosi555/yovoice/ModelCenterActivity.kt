@@ -17,12 +17,13 @@ import android.widget.EditText
 import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.ScrollView
+import android.widget.HorizontalScrollView
 import android.widget.Spinner
 import android.widget.TextView
 import android.text.Editable
 import android.text.TextWatcher
 import android.widget.Toast
-import androidx.activity.ComponentActivity
+import androidx.appcompat.app.AppCompatActivity
 import androidx.core.view.setPadding
 import androidx.work.Constraints
 import androidx.work.ExistingWorkPolicy
@@ -36,7 +37,7 @@ import java.util.Locale
 import java.util.concurrent.Executors
 import org.json.JSONObject
 
-class ModelCenterActivity : ComponentActivity() {
+class ModelCenterActivity : AppCompatActivity() {
     private lateinit var workManager: WorkManager
     private lateinit var sourcePicker: Spinner
     private val downloadStates = mutableMapOf<String, WorkInfo.State?>()
@@ -54,6 +55,8 @@ class ModelCenterActivity : ComponentActivity() {
     private val baseBg get() = intArrayOf(0xFFF7F7F7.toInt(),0xFF0F0F11.toInt(),0xFFF1F6F6.toInt(),0xFFF3EEE4.toInt(),0xFFEFF3ED.toInt(),0xFF04181A.toInt())[themeIndex]
     private val baseSurface get() = intArrayOf(0xFFFFFFFF.toInt(),0xFF18181B.toInt(),0xFFFFFFFF.toInt(),0xFFFBF8F1.toInt(),0xFFFFFFFF.toInt(),0xFF082427.toInt())[themeIndex]
     private val baseThemeDark get() = themeIndex == 1 || themeIndex == 5
+    private val basePrimaryText get() = intArrayOf(0xFF18181A.toInt(),0xFFEDEDEF.toInt(),0xFF0D2427.toInt(),0xFF2B241D.toInt(),0xFF1C2620.toInt(),0xFFE2F2F2.toInt())[themeIndex]
+    private val baseSecondaryText get() = intArrayOf(0xFF77777D.toInt(),0xFF99999F.toInt(),0xFF61777A.toInt(),0xFF827568.toInt(),0xFF69776D.toInt(),0xFF9BBFC0.toInt())[themeIndex]
     private val pageBg get() = if (paletteDark) {
         if (baseThemeDark) baseBg else mixColor(baseBg, android.graphics.Color.BLACK, 0.86f)
     } else {
@@ -61,9 +64,11 @@ class ModelCenterActivity : ComponentActivity() {
     }
     private val surface get() = if (paletteDark) {
         if (baseThemeDark) baseSurface else mixColor(baseSurface, android.graphics.Color.BLACK, 0.82f)
-    } else android.graphics.Color.WHITE
-    private val primaryText get() = if (paletteDark) 0xFFF1F3F4.toInt() else 0xFF202124.toInt()
-    private val secondaryText get() = if (paletteDark) 0xFFADB5B8.toInt() else 0xFF6F7478.toInt()
+    } else {
+        if (baseThemeDark) mixColor(baseSurface, android.graphics.Color.WHITE, 0.88f) else baseSurface
+    }
+    private val primaryText get() = if (paletteDark == baseThemeDark) basePrimaryText else if (paletteDark) 0xFFF1F3F4.toInt() else 0xFF202124.toInt()
+    private val secondaryText get() = if (paletteDark == baseThemeDark) baseSecondaryText else if (paletteDark) 0xFFADB5B8.toInt() else 0xFF6F7478.toInt()
     private val baseAccent get() = intArrayOf(0xFFE0651C.toInt(),0xFFF08A4B.toInt(),0xFF139AA2.toInt(),0xFFC2662D.toInt(),0xFF5E8F45.toInt(),0xFF78E8EE.toInt())[accentIndex]
     private val accentColor get() = when {
         paletteDark && android.graphics.Color.luminance(baseAccent) < 0.35f -> mixColor(baseAccent, android.graphics.Color.WHITE, 0.72f)
@@ -78,12 +83,8 @@ class ModelCenterActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         val appearance = getSharedPreferences("yovoice-ui", MODE_PRIVATE).getString("appearance", "system") ?: "system"
-        val dark = when (appearance) {
-            "light" -> false
-            "dark" -> true
-            else -> (resources.configuration.uiMode and android.content.res.Configuration.UI_MODE_NIGHT_MASK) == android.content.res.Configuration.UI_MODE_NIGHT_YES
-        }
-        setTheme(if (dark) R.style.YovoiceTheme_Dark else R.style.YovoiceTheme_Light)
+        ThemeMode.apply(this, appearance)
+        setTheme(R.style.YovoiceTheme)
         val accentStyle = when (accentIndex) {
             0 -> R.style.YovoiceAccentPaper
             1 -> R.style.YovoiceAccentCoral
@@ -202,16 +203,60 @@ class ModelCenterActivity : ComponentActivity() {
         }
         root.addView(search, params().apply { topMargin = dp(6); bottomMargin = dp(6) })
 
-        val families = listOf("全部模型") + models.map { it.family }.distinct().sorted()
-        val familyPicker = Spinner(this).apply {
-            adapter = ArrayAdapter(this@ModelCenterActivity, android.R.layout.simple_spinner_dropdown_item, families)
-            val requestedFamily = intent.getStringExtra("focus_family")
-            if (!requestedFamily.isNullOrBlank()) {
-                val requestedIndex = families.indexOf(requestedFamily)
-                if (requestedIndex > 0) setSelection(requestedIndex)
+        val featureCategories = ModelFeatureGuide.features.filter { it.modelFamilies.isNotEmpty() }
+        val mappedFamilies = featureCategories.flatMap { it.modelFamilies }.toSet()
+        val categories = mutableListOf("all" to "全部模型")
+        featureCategories.forEach { categories.add(it.id to it.name) }
+        if (models.any { it.family !in mappedFamilies }) categories.add("other" to "其他模型")
+        var selectedCategory = intent.getStringExtra("focus_feature")
+            ?.takeIf { requested -> categories.any { it.first == requested } } ?: "all"
+        val categoryViews = linkedMapOf<String, TextView>()
+        val categoryStrip = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        fun updateCategoryAppearance() {
+            categories.forEach { (id, _) ->
+                val chip = categoryViews[id] ?: return@forEach
+                val selected = selectedCategory == id
+                val fill = if (selected) android.graphics.Color.argb(
+                    30, android.graphics.Color.red(accentColor),
+                    android.graphics.Color.green(accentColor), android.graphics.Color.blue(accentColor)
+                ) else surface
+                chip.setTextColor(if (selected) accentColor else primaryText)
+                chip.background = android.graphics.drawable.RippleDrawable(
+                    ColorStateList.valueOf(if (paletteDark) 0x33FFFFFF else 0x22000000),
+                    GradientDrawable().apply {
+                        setColor(fill)
+                        cornerRadius = dp(18).toFloat()
+                        setStroke(dp(1), if (selected) accentColor else 0x22808080)
+                    }, null
+                )
             }
         }
-        root.addView(familyPicker, params().apply { bottomMargin = dp(8) })
+        categories.forEach { (id, title) ->
+            val chip = TextView(this).apply {
+                text = title
+                textSize = 12f
+                gravity = Gravity.CENTER
+                minHeight = dp(40)
+                setPadding(dp(14), 0, dp(14), 0)
+                isClickable = true
+                isFocusable = true
+                setOnClickListener {
+                    selectedCategory = id
+                    updateCategoryAppearance()
+                    refreshModels()
+                }
+            }
+            categoryViews[id] = chip
+            categoryStrip.addView(chip, LinearLayout.LayoutParams(-2, dp(40)).apply {
+                rightMargin = dp(7)
+            })
+        }
+        updateCategoryAppearance()
+        root.addView(HorizontalScrollView(this).apply {
+            isHorizontalScrollBarEnabled = false
+            clipToPadding = false
+            addView(categoryStrip, ViewGroup.LayoutParams(-2, dp(44)))
+        }, params().apply { topMargin = dp(4); bottomMargin = dp(8) })
 
         val list = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         val empty = TextView(this).apply {
@@ -226,12 +271,19 @@ class ModelCenterActivity : ComponentActivity() {
 
         fun refreshModels() {
             val keyword = search.text?.toString()?.trim()?.lowercase(Locale.ROOT).orEmpty()
-            val family = familyPicker.selectedItem?.toString() ?: "全部模型"
+            val selectedFeature = featureCategories.firstOrNull { it.id == selectedCategory }
             val filtered = models.filter { model ->
-                (family == "全部模型" || model.family == family) &&
-                    (keyword.isEmpty() || model.name.lowercase(Locale.ROOT).contains(keyword) ||
-                        model.family.lowercase(Locale.ROOT).contains(keyword) ||
-                        model.id.lowercase(Locale.ROOT).contains(keyword))
+                val categoryMatches = when (selectedCategory) {
+                    "all" -> true
+                    "other" -> model.family !in mappedFamilies
+                    else -> selectedFeature?.let { model.family in it.modelFamilies } == true
+                }
+                val searchable = listOf(
+                    model.name, model.family, model.id,
+                    ModelFeatureGuide.modelPurpose(model.family),
+                    ModelFeatureGuide.featureNames(model.family)
+                ).joinToString(" ").lowercase(Locale.ROOT)
+                categoryMatches && (keyword.isEmpty() || keyword.split(Regex("\\s+")).all { searchable.contains(it) })
             }.sortedBy { it.packageSize() }
             list.removeAllViews()
             if (filtered.isEmpty()) {
@@ -252,10 +304,6 @@ class ModelCenterActivity : ComponentActivity() {
             override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) = refreshModels()
             override fun afterTextChanged(s: Editable?) = Unit
         })
-        familyPicker.onItemSelectedListener = object : android.widget.AdapterView.OnItemSelectedListener {
-            override fun onNothingSelected(parent: android.widget.AdapterView<*>?) = Unit
-            override fun onItemSelected(parent: android.widget.AdapterView<*>?, view: View?, position: Int, id: Long) = refreshModels()
-        }
         refreshModels()
 
         val scroll = ScrollView(this).apply {
@@ -298,6 +346,19 @@ class ModelCenterActivity : ComponentActivity() {
             setTextColor(secondaryText)
             setPadding(0, dp(2), 0, dp(4))
         }, params())
+        card.addView(TextView(this).apply {
+            text = "主要用途：${ModelFeatureGuide.modelPurpose(model.family)}"
+            textSize = 12f
+            setTextColor(secondaryText)
+            setLineSpacing(dp(2).toFloat(), 1f)
+            maxLines = 3
+        }, params().apply { topMargin = dp(2) })
+        card.addView(TextView(this).apply {
+            text = "适配功能：${ModelFeatureGuide.featureNames(model.family)}"
+            textSize = 11f
+            setTextColor(secondaryText)
+            maxLines = 2
+        }, params().apply { topMargin = dp(2) })
 
         val status = TextView(this).apply {
             val engineSupportsFamily = runtimeReady && model.family in runtimeFamilies

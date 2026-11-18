@@ -1,6 +1,6 @@
 package com.xiaosi555.yovoice
 
-import androidx.activity.ComponentActivity
+import androidx.appcompat.app.AppCompatActivity
 import androidx.activity.OnBackPressedCallback
 import android.app.AlertDialog
 import android.content.Intent
@@ -50,7 +50,7 @@ import java.nio.ByteBuffer
 import java.nio.ByteOrder
 
 /** Mobile studio shell following Yovoice desktop theme tokens and visual hierarchy. */
-class MainActivity : ComponentActivity() {
+class MainActivity : AppCompatActivity() {
     private var tts: TextToSpeech? = null
     private var ttsReady = false
     private var player: MediaPlayer? = null
@@ -155,12 +155,6 @@ class MainActivity : ComponentActivity() {
         (Color.blue(from) * (1f - amount) + Color.blue(to) * amount).toInt()
     )
     private fun applyPlatformTheme() {
-        val dark = when (appearanceMode) {
-            "light" -> false
-            "dark" -> true
-            else -> (resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES
-        }
-        setTheme(if (dark) R.style.YovoiceTheme_Dark else R.style.YovoiceTheme_Light)
         val accentStyle = when (accentIndex.coerceIn(0, 5)) {
             0 -> R.style.YovoiceAccentPaper
             1 -> R.style.YovoiceAccentCoral
@@ -185,6 +179,8 @@ class MainActivity : ComponentActivity() {
         themeIndex = uiPrefs.getInt("theme", 0).coerceIn(0, palettes.lastIndex)
         accentIndex = uiPrefs.getInt("accent", themeIndex).coerceIn(0, accentColors.lastIndex)
         appearanceMode = uiPrefs.getString("appearance", "system") ?: "system"
+        ThemeMode.apply(this, appearanceMode)
+        setTheme(R.style.YovoiceTheme)
         applyPlatformTheme()
         super.onCreate(savedInstanceState)
         val ttsPrefs = getSharedPreferences("yovoice-tts", MODE_PRIVATE)
@@ -569,7 +565,9 @@ class MainActivity : ComponentActivity() {
         }
         val modelText = column()
         modelText.addView(label(selectedModel?.name ?: "尚未选择模型", 13, p.text, true))
-        modelText.addView(modelStateLabel)
+        modelText.addView(label("适配此功能的模型：${models.size} 个 · 按体积从小到大", 11, p.secondary), marginTop(2))
+        selectedModel?.let { modelText.addView(label("用途：" + ModelFeatureGuide.modelPurpose(it.family), 11, p.secondary).apply { maxLines = 2 }, marginTop(2)) }
+        modelText.addView(modelStateLabel, marginTop(2))
         modelRow.addView(modelText, LinearLayout.LayoutParams(0, -2, 1f))
         modelRow.addView(LineIconView(this, "chevron", p.secondary), LinearLayout.LayoutParams(dp(20), dp(20)))
         body.addView(modelRow, marginTop(7))
@@ -830,7 +828,10 @@ class MainActivity : ComponentActivity() {
         }
         val copy = column()
         copy.addView(label("本地模型", 11, p.secondary, true))
-        copy.addView(label(selected?.name ?: "尚未选择 · 点击推荐模型", 14, p.text, true), marginTop(3))
+        copy.addView(label(selected?.name ?: "尚未选择 · 点击查看适配模型", 14, p.text, true), marginTop(3))
+        val availableCount = ModelCatalog.load(this).count { it.family in feature.modelFamilies }
+        copy.addView(label("适配模型：${availableCount} 个 · 轻量优先", 11, p.secondary), marginTop(2))
+        selected?.let { copy.addView(label("用途：" + ModelFeatureGuide.modelPurpose(it.family), 11, p.secondary).apply { maxLines = 2 }, marginTop(2)) }
         val isInUse = selected != null && nativeLoadedModelId == selected.id && (featureId != "tts" || activeTtsEngineId.startsWith("native:"))
         val modelState = label(
             if (selected == null) "推荐适配模型 · 可在此下载"
@@ -872,12 +873,12 @@ class MainActivity : ComponentActivity() {
             .filter { it.family in feature.modelFamilies }
             .sortedBy { it.packageSize() }
         val compatibleModels = allFeatureModels.filter { it.family in runtimeFamilies }
-        val models = (if (compatibleModels.isNotEmpty()) compatibleModels else allFeatureModels).take(3)
+        // Show every model mapped to this creation feature. Runtime support is a separate state, never a silent filter.
         val content = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(18), dp(8), dp(18), dp(8))
         }
-        content.addView(label("优先推荐当前 Android 引擎已编入的模型。下载完成还会逐文件校验 SHA-256。", 12, p.secondary))
+        content.addView(label("本功能适配的模型按体积从小到大排列；每项显示用途和本机运行时状态。下载完成还会逐文件校验 SHA-256。", 12, p.secondary))
         if (!runtimeReady || compatibleModels.isEmpty()) {
             content.addView(label("当前设备运行时尚未报告此功能的可用模型家族。下列未适配模型仅供查看，不能作为可运行模型。", 12, 0xFF9A6428.toInt()).apply {
                 setPadding(dp(10), dp(8), dp(10), dp(8))
@@ -893,9 +894,9 @@ class MainActivity : ComponentActivity() {
                 startActivity(Intent(this, ModelCenterActivity::class.java).putExtra("focus_feature", featureId))
             }
             .create()
-        if (models.isEmpty()) content.addView(label("模型目录中暂时没有关联到此功能的模型。", 13, p.secondary), marginTop(12))
+        if (allFeatureModels.isEmpty()) content.addView(label("模型目录中暂时没有关联到此功能的模型。", 13, p.secondary), marginTop(12))
         val manager = WorkManager.getInstance(applicationContext)
-        models.forEach { model ->
+        allFeatureModels.forEach { model ->
             val supported = runtimeReady && model.family in runtimeFamilies
             val selectedNow = getSharedPreferences("yovoice-model-selection", MODE_PRIVATE).getString(featureId, null) == model.id
             val item = LinearLayout(this).apply {
@@ -907,6 +908,8 @@ class MainActivity : ComponentActivity() {
             val titleColumn = column()
             titleColumn.addView(label(model.name, 14, p.text, true))
             titleColumn.addView(label(model.family + " · " + model.formattedSize() + " · " + model.precision, 11, p.secondary), marginTop(3))
+            titleColumn.addView(label("用途：" + ModelFeatureGuide.modelPurpose(model.family), 11, p.secondary).apply { maxLines = 3 }, marginTop(4))
+            titleColumn.addView(label("适配功能：" + ModelFeatureGuide.featureNames(model.family), 11, p.secondary).apply { maxLines = 2 }, marginTop(2))
             titleRow.addView(titleColumn, LinearLayout.LayoutParams(0, -2, 1f))
             if (selectedNow) titleRow.addView(label("已选择", 11, p.accent, true))
             item.addView(titleRow)
@@ -1152,33 +1155,46 @@ class MainActivity : ComponentActivity() {
 
     private fun renderSettings() {
         renderHeader("我的", "外观、语音与设备设置")
-        body.addView(label("外观模式", 17, p.text, true), marginTop(22))
+
+        val appearanceCard = card()
+        appearanceCard.addView(section("外观模式", "跟随手机系统，或固定使用亮色 / 暗色；此设置只影响 Yovoice，不改变手机系统主题。"))
         val modeRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-        listOf("system" to "跟随系统", "light" to "白天", "dark" to "夜间").forEach { (mode, title) ->
+        listOf("system" to "跟随系统", "light" to "亮色", "dark" to "暗色").forEach { (mode, title) ->
             val chip = TextView(this).apply {
-                text = (if (appearanceMode == mode) "✓ " else "") + title
+                text = (if (appearanceMode == mode) "✓  " else "") + title
                 gravity = Gravity.CENTER
                 textSize = 13f
+                minHeight = dp(48)
                 setTextColor(if (appearanceMode == mode) p.accent else p.text)
-                background = shape(if (appearanceMode == mode) Color.argb(28, Color.red(p.accent), Color.green(p.accent), Color.blue(p.accent)) else p.surface, dp(12), p.border, dp(1))
+                background = ripple(
+                    if (appearanceMode == mode) Color.argb(28, Color.red(p.accent), Color.green(p.accent), Color.blue(p.accent)) else p.surface,
+                    dp(12), if (appearanceMode == mode) p.accent else p.border
+                )
+                isClickable = true
+                isFocusable = true
                 setOnClickListener {
+                    if (appearanceMode == mode) return@setOnClickListener
                     appearanceMode = mode
                     getSharedPreferences("yovoice-ui", MODE_PRIVATE).edit().putString("appearance", mode).apply()
-                    applyPlatformTheme()
-                    render()
+                    ThemeMode.apply(this@MainActivity, mode)
                 }
             }
-            modeRow.addView(chip, LinearLayout.LayoutParams(0, dp(48), 1f).apply { if (mode != "system") leftMargin = dp(7) })
+            modeRow.addView(chip, LinearLayout.LayoutParams(0, dp(48), 1f).apply {
+                if (mode != "system") leftMargin = dp(7)
+            })
         }
-        body.addView(modeRow, marginTop(9))
-        body.addView(label("界面风格", 17, p.text, true), marginTop(20))
+        appearanceCard.addView(modeRow, marginTop(8))
+        body.addView(appearanceCard, marginTop(12))
+
+        val themeCard = card()
+        themeCard.addView(section("界面风格", "六套风格沿用桌面端主题的背景、表面和文字层级；明暗模式独立生效。"))
         val styleGrid = GridLayout(this).apply { columnCount = 3; useDefaultMargins = false }
         palettes.forEachIndexed { index, palette ->
             val item = LinearLayout(this).apply {
                 orientation = LinearLayout.HORIZONTAL
                 gravity = Gravity.CENTER
                 setPadding(dp(4), dp(8), dp(4), dp(8))
-                background = shape(palette.surface, dp(12), if (themeIndex == index) p.accent else palette.border, dp(1))
+                background = ripple(palette.surface, dp(12), if (themeIndex == index) p.accent else palette.border)
                 val swatch = View(this@MainActivity).apply { background = shape(palette.bg, dp(5), palette.border, dp(1)) }
                 addView(swatch, LinearLayout.LayoutParams(dp(18), dp(18)))
                 addView(TextView(this@MainActivity).apply {
@@ -1193,21 +1209,26 @@ class MainActivity : ComponentActivity() {
                     render()
                 }
             }
-            styleGrid.addView(item, GridLayout.LayoutParams(GridLayout.spec(index / 3, 1f), GridLayout.spec(index % 3, 1f)).apply {
+            styleGrid.addView(item, GridLayout.LayoutParams(
+                GridLayout.spec(index / 3, 1f), GridLayout.spec(index % 3, 1f)
+            ).apply {
                 width = 0
                 height = dp(48)
                 setMargins(dp(3), dp(4), dp(3), dp(4))
             })
         }
-        body.addView(styleGrid, marginTop(10))
-        body.addView(label("主题颜色", 17, p.text, true), marginTop(18))
+        themeCard.addView(styleGrid, marginTop(8))
+        body.addView(themeCard, marginTop(12))
+
+        val accentCard = card()
+        accentCard.addView(section("主题颜色", "强调色统一应用于主操作、选中状态、进度和线性图标，不叠加多种强调色。"))
         val accentGrid = GridLayout(this).apply { columnCount = 3; useDefaultMargins = false }
         accentNames.forEachIndexed { index, name ->
             val item = LinearLayout(this).apply {
                 orientation = LinearLayout.HORIZONTAL
                 gravity = Gravity.CENTER
                 setPadding(dp(4), dp(8), dp(4), dp(8))
-                background = shape(p.surface, dp(12), if (accentIndex == index) p.accent else p.border, dp(1))
+                background = ripple(p.surface, dp(12), if (accentIndex == index) p.accent else p.border)
                 addView(View(this@MainActivity).apply {
                     background = shape(accentColors[index], dp(8))
                 }, LinearLayout.LayoutParams(dp(16), dp(16)))
@@ -1224,23 +1245,31 @@ class MainActivity : ComponentActivity() {
                     render()
                 }
             }
-            accentGrid.addView(item, GridLayout.LayoutParams(GridLayout.spec(index / 3, 1f), GridLayout.spec(index % 3, 1f)).apply {
+            accentGrid.addView(item, GridLayout.LayoutParams(
+                GridLayout.spec(index / 3, 1f), GridLayout.spec(index % 3, 1f)
+            ).apply {
                 width = 0
                 height = dp(48)
                 setMargins(dp(3), dp(4), dp(3), dp(4))
             })
         }
-        body.addView(accentGrid, marginTop(10))
-        body.addView(label("语音引擎", 17, p.text, true), marginTop(24))
-        body.addView(infoRow("手机系统 TTS", if (ttsReady) "已就绪" else "未就绪或正在检测"), marginTop(8))
-        body.addView(secondaryButton("选择语音引擎 / 打开系统语音设置") { showTtsOptions() }, marginTop(8))
-        body.addView(infoRow("Android 本地推理引擎", "Audio8 TTS · Qwen3 ASR 0.6B"), marginTop(8))
-        body.addView(label("本地推理性能", 17, p.text, true), marginTop(24))
+        accentCard.addView(accentGrid, marginTop(8))
+        body.addView(accentCard, marginTop(12))
+
+        val engineCard = card()
+        engineCard.addView(section("语音引擎", "查看手机系统语音服务，选择当前用于朗读和合成的引擎。"))
+        engineCard.addView(label("手机系统 TTS · " + if (ttsReady) "已就绪" else "未就绪或正在检测", 13, p.secondary), marginTop(5))
+        engineCard.addView(secondaryButton("选择语音引擎 / 打开系统语音设置") { showTtsOptions() }, marginTop(8))
+        engineCard.addView(label("Android 本地推理引擎 · Audio8 TTS / Qwen3 ASR 等已编入家族", 12, p.secondary), marginTop(8))
+        body.addView(engineCard, marginTop(12))
+
+        val runtimeCard = card()
+        runtimeCard.addView(section("本地推理性能", "线程数会影响速度、内存占用和耗电；设置在下一次模型加载时生效。"))
         val runtimePrefs = getSharedPreferences("yovoice-runtime", MODE_PRIVATE)
         val currentThreads = runtimePrefs.getInt("threads", 2).coerceIn(1, 4)
         val threadLabel = label("推理线程：$currentThreads", 13, p.secondary)
-        body.addView(threadLabel, marginTop(8))
-        body.addView(SeekBar(this).apply {
+        runtimeCard.addView(threadLabel, marginTop(5))
+        runtimeCard.addView(SeekBar(this).apply {
             max = 3
             progress = currentThreads - 1
             setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
@@ -1253,41 +1282,46 @@ class MainActivity : ComponentActivity() {
                 override fun onStopTrackingTouch(seekBar: SeekBar?) {}
             })
         }, marginTop(4))
-        body.addView(label("线程数会影响速度与耗电；内存有限时建议保持 2。修改后对下一次模型加载生效。", 12, p.secondary), marginTop(4))
+        body.addView(runtimeCard, marginTop(12))
+
+        val storageCard = card()
+        storageCard.addView(section("本地存储", "模型文件、生成作品和应用剩余可用空间。"))
         val modelDir = File(filesDir, "models")
-        val storageInfo = infoRow("本地存储", "正在统计手机内的模型与作品文件…")
-        body.addView(storageInfo, marginTop(10))
+        val storageInfo = label("正在统计手机内的模型与作品文件…", 12, p.secondary)
+        storageCard.addView(storageInfo, marginTop(5))
         storageExecutor.execute {
             val modelBytes = directoryBytes(modelDir)
             val projectBytes = generatedStorageBytes()
             val freeBytes = runCatching { android.os.StatFs(filesDir.absolutePath).availableBytes }.getOrDefault(0L)
             runOnUiThread {
                 if (!destroyed && !isFinishing && !isDestroyed) {
-                    storageInfo.text = "本地存储\\n模型：${formatStorage(modelBytes)} · 作品：${formatStorage(projectBytes)}\\n应用可用空间：${formatStorage(freeBytes)}\\n模型目录：${modelDir.absolutePath}"
+                    storageInfo.text = "模型：${formatStorage(modelBytes)} · 作品：${formatStorage(projectBytes)}\n应用可用空间：${formatStorage(freeBytes)}\n模型目录：${modelDir.absolutePath}"
                 }
             }
         }
-        body.addView(secondaryButton("打开系统应用设置") {
+        storageCard.addView(secondaryButton("打开系统应用设置") {
             val intent = Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:" + packageName))
             startActivity(intent)
         }, marginTop(8))
-        body.addView(label("AI 助手服务", 17, p.text, true), marginTop(24))
+        body.addView(storageCard, marginTop(12))
+
+        val assistantCard = card()
+        assistantCard.addView(section("AI 助手服务", "配置兼容的在线服务；密钥使用 Android Keystore 加密保存。"))
         val assistantPrefs = getSharedPreferences("yovoice-assistant", MODE_PRIVATE)
         val endpointInput = EditText(this).apply {
             hint = "API 地址，例如 https://api.openai.com/v1"
             setText(assistantPrefs.getString("endpoint", "https://api.openai.com/v1"))
             textSize = 14f; setTextColor(p.text); setHintTextColor(p.secondary)
             background = shape(p.surface, dp(12), p.border, dp(1)); setPadding(dp(12), dp(10), dp(12), dp(10))
-            inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_URI
         }
-        body.addView(endpointInput, marginTop(8))
+        assistantCard.addView(endpointInput, marginTop(8))
         val modelInput = EditText(this).apply {
             hint = "模型名称，例如 gpt-4o-mini"
             setText(assistantPrefs.getString("model", "gpt-4o-mini"))
             textSize = 14f; setTextColor(p.text); setHintTextColor(p.secondary)
             background = shape(p.surface, dp(12), p.border, dp(1)); setPadding(dp(12), dp(10), dp(12), dp(10))
         }
-        body.addView(modelInput, marginTop(8))
+        assistantCard.addView(modelInput, marginTop(8))
         val keyInput = EditText(this).apply {
             hint = "API Key（使用 Android Keystore 加密保存）"
             setText(runCatching { ApiKeyStore.get(this@MainActivity) }.getOrDefault(""))
@@ -1295,8 +1329,8 @@ class MainActivity : ComponentActivity() {
             inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD
             background = shape(p.surface, dp(12), p.border, dp(1)); setPadding(dp(12), dp(10), dp(12), dp(10))
         }
-        body.addView(keyInput, marginTop(8))
-        body.addView(secondaryButton("保存 AI 服务配置") {
+        assistantCard.addView(keyInput, marginTop(8))
+        assistantCard.addView(secondaryButton("保存 AI 服务配置") {
             val endpoint = endpointInput.text.toString().trim().trimEnd('/')
             val model = modelInput.text.toString().trim()
             val key = keyInput.text.toString().trim()
@@ -1313,13 +1347,13 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }, marginTop(10))
-        body.addView(secondaryButton("清除本机保存的 API Key") {
+        assistantCard.addView(secondaryButton("清除本机保存的 API Key") {
             runCatching { ApiKeyStore.clear(this) }
                 .onSuccess { keyInput.setText(""); Toast.makeText(this, "已清除本机 API Key", Toast.LENGTH_SHORT).show() }
                 .onFailure { Toast.makeText(this, "清除失败：" + (it.localizedMessage ?: "未知错误"), Toast.LENGTH_LONG).show() }
         }, marginTop(6))
-        body.addView(label("隐私提示：使用 AI 助手时，输入的创作内容会发送到你配置的第三方服务商；请勿提交密码、密钥或其他敏感信息。API Key 使用 Android Keystore 加密保存。", 12, p.secondary), marginTop(12))
-        body.addView(label("主题名称与颜色沿用 Yovoice 桌面版主题体系；移动端针对单手操作重新排布。", 12, p.secondary), marginTop(18))
+        body.addView(assistantCard, marginTop(12))
+        body.addView(label("隐私提示：使用 AI 助手时，输入的创作内容会发送到你配置的第三方服务商；请勿提交密码、密钥或其他敏感信息。", 12, p.secondary), marginTop(10))
     }
 
     private fun requestAssistant(prompt: String, output: TextView) {
