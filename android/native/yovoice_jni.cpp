@@ -34,6 +34,8 @@ struct RuntimeState {
     audiocpp_session* session = nullptr;
     std::string model_path;
     std::string family;
+    std::string task;
+    std::string mode;
 };
 
 std::mutex g_mutex;
@@ -192,18 +194,26 @@ Java_com_xiaosi555_yovoice_NativeEngine_nativeProbe(JNIEnv* env, jobject) {
 
 extern "C" JNIEXPORT jstring JNICALL
 Java_com_xiaosi555_yovoice_NativeEngine_nativeLoadModel(
-    JNIEnv* env, jobject, jstring model_path, jstring family, jint threads
+    JNIEnv* env, jobject, jstring model_path, jstring family, jstring task, jstring mode, jint threads
 ) {
     UtfChars path(env, model_path);
     UtfChars family_name(env, family);
+    UtfChars task_name(env, task);
+    UtfChars mode_name(env, mode);
+    const std::string task_value = task_name.get()[0] == '\0' ? "tts" : task_name.get();
+    const std::string mode_value = mode_name.get()[0] == '\0' ? "offline" : mode_name.get();
     if (path.get()[0] == '\0' || family_name.get()[0] == '\0') {
         return make_string(env, failure_json("模型路径或模型家族为空"));
+    }
+    if ((task_value != "tts" && task_value != "asr") || mode_value != "offline") {
+        return make_string(env, failure_json("当前 Android 原生运行时仅开放离线 TTS 与 ASR"));
     }
 
     std::lock_guard<std::mutex> lock(g_mutex);
     if (g_state.session != nullptr &&
         g_state.model_path == path.get() &&
-        g_state.family == family_name.get()) {
+        g_state.family == family_name.get() &&
+        g_state.task == task_value && g_state.mode == mode_value) {
         return make_string(env, "{\"ok\":true,\"alreadyLoaded\":true}");
     }
     release_state();
@@ -227,9 +237,9 @@ Java_com_xiaosi555_yovoice_NativeEngine_nativeLoadModel(
         return make_string(env, failure_json(message));
     }
 
-    if (!audiocpp_model_supports(g_state.model, "tts", "offline")) {
+    if (!audiocpp_model_supports(g_state.model, task_value.c_str(), mode_value.c_str())) {
         release_state();
-        return make_string(env, failure_json("该模型当前不支持离线 TTS"));
+        return make_string(env, failure_json("该模型不支持所选任务或运行模式"));
     }
 
     audiocpp_backend_config backend{
@@ -240,7 +250,7 @@ Java_com_xiaosi555_yovoice_NativeEngine_nativeLoadModel(
         audiocpp_options_set(options, "mem_saver", "true");
     }
     status = audiocpp_session_create(
-        g_state.model, "tts", "offline", &backend, options, &g_state.session
+        g_state.model, task_value.c_str(), mode_value.c_str(), &backend, options, &g_state.session
     );
     if (options != nullptr) audiocpp_options_free(options);
     if (status != AUDIOCPP_OK) {
@@ -251,6 +261,8 @@ Java_com_xiaosi555_yovoice_NativeEngine_nativeLoadModel(
 
     g_state.model_path = path.get();
     g_state.family = family_name.get();
+    g_state.task = task_value;
+    g_state.mode = mode_value;
     return make_string(env, "{\"ok\":true,\"alreadyLoaded\":false}");
 }
 
@@ -334,6 +346,79 @@ Java_com_xiaosi555_yovoice_NativeEngine_nativeSynthesize(
          << ",\"sampleRate\":" << sample_rate
          << ",\"channels\":" << channels
          << ",\"styleControlsApplied\":" << (style_controls_applied ? "true" : "false") << "}";
+    return make_string(env, json.str());
+}
+
+extern "C" JNIEXPORT jstring JNICALL
+Java_com_xiaosi555_yovoice_NativeEngine_nativeTranscribe(
+    JNIEnv* env, jobject, jfloatArray pcm_array, jint sample_rate, jint channels, jstring language
+) {
+    UtfChars language_name(env, language);
+    if (pcm_array == nullptr || sample_rate <= 0 || channels <= 0) {
+        return make_string(env, failure_json("音频数据或采样参数无效"));
+    }
+    const jsize sample_count = env->GetArrayLength(pcm_array);
+    if (sample_count <= 0 || sample_count > 120000000) {
+        return make_string(env, failure_json("音频长度无效或超过 Android 单次推理上限"));
+    }
+    jfloat* samples = env->GetFloatArrayElements(pcm_array, nullptr);
+    if (samples == nullptr) return make_string(env, failure_json("无法读取音频 PCM 数据"));
+    std::lock_guard<std::mutex> lock(g_mutex);
+    if (g_state.session == nullptr || g_state.task != "asr") {
+        env->ReleaseFloatArrayElements(pcm_array, samples, JNI_ABORT);
+        return make_string(env, failure_json("请先加载 ASR 模型"));
+    }
+    audiocpp_request* request = audiocpp_request_create();
+    if (request == nullptr) {
+        env->ReleaseFloatArrayElements(pcm_array, samples, JNI_ABORT);
+        return make_string(env, failure_json("无法创建 ASR 请求"));
+    }
+    const size_t frames = static_cast<size_t>(sample_count) / static_cast<size_t>(channels);
+    audiocpp_status status = audiocpp_request_set_audio(request, samples, frames, sample_rate, channels);
+    env->ReleaseFloatArrayElements(pcm_array, samples, JNI_ABORT);
+    if (status == AUDIOCPP_OK && language_name.get()[0] != '\0') {
+        status = audiocpp_request_set_option(request, "language", language_name.get());
+    }
+    if (status != AUDIOCPP_OK) {
+        const std::string message = status_message(status);
+        audiocpp_request_free(request);
+        return make_string(env, failure_json(message));
+    }
+    audiocpp_result* result = nullptr;
+    status = audiocpp_session_run(g_state.session, request, &result);
+    audiocpp_request_free(request);
+    if (status != AUDIOCPP_OK || result == nullptr) {
+        const std::string message = status_message(status);
+        if (result != nullptr) audiocpp_result_free(result);
+        return make_string(env, failure_json(message));
+    }
+    const char* transcript = nullptr;
+    const char* result_language = nullptr;
+    status = audiocpp_result_text(result, &transcript, &result_language);
+    if (status != AUDIOCPP_OK || transcript == nullptr) {
+        const std::string message = status_message(status);
+        audiocpp_result_free(result);
+        return make_string(env, failure_json(message));
+    }
+    std::ostringstream json;
+    json << "{\"ok\":true,\"text\":\"" << json_escape(transcript)
+         << "\",\"language\":\"" << json_escape(result_language == nullptr ? "" : result_language)
+         << "\",\"sampleRate\":" << sample_rate << ",\"segments\":[";
+    bool first = true;
+    const size_t count = audiocpp_result_segment_count(result);
+    for (size_t i = 0; i < count; ++i) {
+        int64_t start = 0, end = 0;
+        float confidence = 0.0f;
+        const char* segment_text = nullptr;
+        if (audiocpp_result_segment(result, i, &start, &end, &confidence, &segment_text) != AUDIOCPP_OK) continue;
+        if (!first) json << ",";
+        json << "{\"startSample\":" << start << ",\"endSample\":" << end
+             << ",\"confidence\":" << confidence << ",\"text\":\""
+             << json_escape(segment_text == nullptr ? "" : segment_text) << "\"}";
+        first = false;
+    }
+    json << "]}";
+    audiocpp_result_free(result);
     return make_string(env, json.str());
 }
 
