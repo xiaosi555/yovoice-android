@@ -105,6 +105,9 @@ class MainActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         themeIndex = getSharedPreferences("yovoice-ui", MODE_PRIVATE).getInt("theme", 0).coerceIn(0, palettes.lastIndex)
+        val ttsPrefs = getSharedPreferences("yovoice-tts", MODE_PRIVATE)
+        speechRate = ttsPrefs.getFloat("speech_rate", 1.0f).coerceIn(0.1f, 3.0f)
+        speechPitch = ttsPrefs.getFloat("speech_pitch", 1.0f).coerceIn(0.1f, 3.0f)
         applyModelLaunchIntent(intent)
         buildShell()
         initializeSystemTts()
@@ -235,7 +238,11 @@ class MainActivity : Activity() {
                     val voices = tts?.voices.orEmpty().filter { !it.isNetworkConnectionRequired }
                         .sortedWith(compareBy({ !it.locale.language.equals("zh", true) }, { it.name }))
                     selectedVoiceName = voices.getOrNull(position)?.name
-                    selectedVoiceName?.let { name -> voices.firstOrNull { it.name == name }?.let { voice -> runCatching { tts?.voice = voice } } }
+                    selectedVoiceName?.let { name ->
+                        getSharedPreferences("yovoice-tts", MODE_PRIVATE).edit()
+                            .putString("voice:" + activeTtsEngineId, name).apply()
+                        voices.firstOrNull { it.name == name }?.let { voice -> runCatching { tts?.voice = voice } }
+                    }
                 }
             }
         }
@@ -244,10 +251,11 @@ class MainActivity : Activity() {
         panel.addView(speedLabel, marginTop(10))
         panel.addView(SeekBar(this).apply {
             max = 30
-            progress = 10
+            progress = (speechRate * 10).toInt().coerceIn(1, 30)
             setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
                 override fun onProgressChanged(seekBar: SeekBar?, value: Int, fromUser: Boolean) {
                     speechRate = (value.coerceAtLeast(1) / 10f).coerceIn(0.1f, 3f)
+                    getSharedPreferences("yovoice-tts", MODE_PRIVATE).edit().putFloat("speech_rate", speechRate).apply()
                     speedLabel.text = "语速 %.1f×".format(speechRate)
                 }
                 override fun onStartTrackingTouch(seekBar: SeekBar?) {}
@@ -258,10 +266,11 @@ class MainActivity : Activity() {
         panel.addView(pitchLabel, marginTop(8))
         panel.addView(SeekBar(this).apply {
             max = 30
-            progress = 10
+            progress = (speechPitch * 10).toInt().coerceIn(1, 30)
             setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
                 override fun onProgressChanged(seekBar: SeekBar?, value: Int, fromUser: Boolean) {
                     speechPitch = (value.coerceAtLeast(1) / 10f).coerceIn(0.1f, 3f)
+                    getSharedPreferences("yovoice-tts", MODE_PRIVATE).edit().putFloat("speech_pitch", speechPitch).apply()
                     pitchLabel.text = "音调 %.1f×".format(speechPitch)
                 }
                 override fun onStartTrackingTouch(seekBar: SeekBar?) {}
@@ -1021,6 +1030,14 @@ class MainActivity : Activity() {
     private var activeTtsEngineLabel = "正在发现语音引擎…"
 
     private fun initializeSystemTts() {
+        val prefs = getSharedPreferences("yovoice-tts", MODE_PRIVATE)
+        if (prefs.getString("selected_tts_engine_id", null) == "native:audio8") {
+            activeTtsEngineId = "native:audio8"
+            activeTtsEngineLabel = "Audio8 本地引擎"
+            if (::enginePicker.isInitialized) enginePicker.text = activeTtsEngineLabel + "   ›"
+            if (::status.isInitialized) status.text = "已恢复 Audio8 本地引擎选择；请确认模型已下载并校验。"
+            return
+        }
         val providers = TtsProviderRegistry.discover(this)
         if (providers.isEmpty()) {
             ttsReady = false
@@ -1029,7 +1046,6 @@ class MainActivity : Activity() {
             if (::enginePicker.isInitialized) enginePicker.text = activeTtsEngineLabel + "   ›"
             return
         }
-        val prefs = getSharedPreferences("yovoice-tts", MODE_PRIVATE)
         val saved = prefs.getString("selected_tts_engine_id", null)
         val defaultPackage = runCatching {
             android.provider.Settings.Secure.getString(contentResolver, "tts_default_synth")
@@ -1801,18 +1817,19 @@ class MainActivity : Activity() {
     }
 
     private fun refreshSystemVoices() {
-        val voices = runCatching { tts?.voices.orEmpty().filter { !it.isNetworkConnectionRequired }
-            .sortedWith(compareBy({ !it.locale.language.equals("zh", true) }, { it.name })) }.getOrDefault(emptyList())
+        val voices = runCatching { tts?.voices.orEmpty()
+            .sortedWith(compareBy({ !it.locale.language.equals("zh", true) }, { it.isNetworkConnectionRequired }, { it.name })) }.getOrDefault(emptyList())
         val names = voices.map { voice ->
             val language = voice.locale.getDisplayLanguage(Locale.SIMPLIFIED_CHINESE)
             val country = voice.locale.getDisplayCountry(Locale.SIMPLIFIED_CHINESE)
             val quality = if (voice.quality >= android.speech.tts.Voice.QUALITY_HIGH) "高品质" else "标准"
             "${voice.name} · $language $country · $quality"
         }.ifEmpty { listOf("当前引擎未提供可选音色") }
-        val currentIndex = voices.indexOfFirst { it.name == selectedVoiceName }.coerceAtLeast(0)
+        val currentIndex = voices.indexOfFirst { it.name == selectedVoiceName }.let { if (it >= 0) it else 0 }
         voicePicker.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, names)
         if (voices.isNotEmpty()) {
             selectedVoiceName = voices[currentIndex].name
+            runCatching { tts?.voice = voices[currentIndex] }
             voicePicker.setSelection(currentIndex)
         }
     }
