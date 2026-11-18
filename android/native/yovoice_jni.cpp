@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <fstream>
 #include <limits>
+#include <cmath>
 #include <mutex>
 #include <sstream>
 #include <string>
@@ -255,7 +256,8 @@ Java_com_xiaosi555_yovoice_NativeEngine_nativeLoadModel(
 
 extern "C" JNIEXPORT jstring JNICALL
 Java_com_xiaosi555_yovoice_NativeEngine_nativeSynthesize(
-    JNIEnv* env, jobject, jstring text, jstring language, jstring output_path
+    JNIEnv* env, jobject, jstring text, jstring language, jstring output_path,
+    jfloat speaking_rate, jfloat pitch_multiplier
 ) {
     UtfChars input_text(env, text);
     UtfChars language_name(env, language);
@@ -269,10 +271,27 @@ Java_com_xiaosi555_yovoice_NativeEngine_nativeSynthesize(
         return make_string(env, failure_json("尚未加载语音模型"));
     }
 
+    if (!std::isfinite(speaking_rate) || speaking_rate <= 0.0f ||
+        !std::isfinite(pitch_multiplier) || pitch_multiplier <= 0.0f) {
+        return make_string(env, failure_json("语速或音调参数无效"));
+    }
     audiocpp_request* request = audiocpp_request_create();
     if (request == nullptr) return make_string(env, failure_json("无法创建推理请求"));
     const char* language_value = language_name.get()[0] == '\0' ? nullptr : language_name.get();
     audiocpp_status status = audiocpp_request_set_text(request, input_text.get(), language_value);
+    const bool style_controls_applied = audiocpp_model_supports_style_condition(g_state.model) != 0;
+    if (style_controls_applied) {
+        status = audiocpp_request_set_speaking_rate(request, speaking_rate);
+        if (status == AUDIOCPP_OK) {
+            const float pitch_semitones = 12.0f * std::log2(pitch_multiplier);
+            status = audiocpp_request_set_pitch_shift(request, pitch_semitones);
+        }
+        if (status != AUDIOCPP_OK) {
+            const std::string message = status_message(status);
+            audiocpp_request_free(request);
+            return make_string(env, failure_json(message));
+        }
+    }
     if (status != AUDIOCPP_OK) {
         const std::string message = status_message(status);
         audiocpp_request_free(request);
@@ -308,7 +327,8 @@ Java_com_xiaosi555_yovoice_NativeEngine_nativeSynthesize(
     json << "{\"ok\":true,\"path\":\"" << json_escape(output.get())
          << "\",\"frames\":" << frames
          << ",\"sampleRate\":" << sample_rate
-         << ",\"channels\":" << channels << "}";
+         << ",\"channels\":" << channels
+         << ",\"styleControlsApplied\":" << (style_controls_applied ? "true" : "false") << "}";
     return make_string(env, json.str());
 }
 
