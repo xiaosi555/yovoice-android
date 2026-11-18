@@ -310,7 +310,7 @@ class MainActivity : ComponentActivity() {
                     getSharedPreferences("yovoice-tts", MODE_PRIVATE).edit()
                         .putFloat("speech_rate", speechRate)
                         .putFloat("speech_rate:" + activeTtsEngineId, speechRate).apply()
-                    if (activeTtsEngineId != "native:audio8") {
+                    if (!activeTtsEngineId.startsWith("native:")) {
                         val result = runCatching { tts?.setSpeechRate(speechRate) ?: TextToSpeech.ERROR }.getOrDefault(TextToSpeech.ERROR)
                         if (fromUser && result == TextToSpeech.ERROR && ::status.isInitialized) {
                             status.text = activeTtsEngineLabel + " 不支持调整语速。"
@@ -334,7 +334,7 @@ class MainActivity : ComponentActivity() {
                     getSharedPreferences("yovoice-tts", MODE_PRIVATE).edit()
                         .putFloat("speech_pitch", speechPitch)
                         .putFloat("speech_pitch:" + activeTtsEngineId, speechPitch).apply()
-                    if (activeTtsEngineId != "native:audio8") {
+                    if (!activeTtsEngineId.startsWith("native:")) {
                         val result = runCatching { tts?.setPitch(speechPitch) ?: TextToSpeech.ERROR }.getOrDefault(TextToSpeech.ERROR)
                         if (fromUser && result == TextToSpeech.ERROR && ::status.isInitialized) {
                             status.text = activeTtsEngineLabel + " 不支持调整音调。"
@@ -349,12 +349,36 @@ class MainActivity : ComponentActivity() {
         panel.addView(pitchSeekBar, marginTop(2))
 
         panel.addView(primaryButton("试听朗读（手机 TTS）") { speak() }, marginTop(10))
-        panel.addView(secondaryButton("本地语音 · Audio8 TTS") { speakWithLocalModel() }, marginTop(9))
         panel.addView(secondaryButton("释放本地模型内存") { unloadLocalModel() }, marginTop(8))
         body.addView(panel, marginTop(18))
-        val shortcuts = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; weightSum = 2f }
-        shortcuts.addView(secondaryButton("导入音频") { chooseAudio() }, LinearLayout.LayoutParams(0, dp(64), 1f))
-        shortcuts.addView(secondaryButton("模型中心") { page = 2; render() }, LinearLayout.LayoutParams(0, dp(64), 1f).apply { leftMargin = dp(10) })
+        addFeatureModelSelector("tts", body)
+        val subtitleToggle = CheckBox(this).apply {
+            text = "显示字幕预览"
+            textSize = 14f
+            setTextColor(p.text)
+            isChecked = ttsSubtitleEnabled
+            setOnCheckedChangeListener { _, checked ->
+                ttsSubtitleEnabled = checked
+                ttsSubtitlePreview?.visibility = if (checked) View.VISIBLE else View.GONE
+            }
+        }
+        body.addView(subtitleToggle, marginTop(14))
+        ttsSubtitlePreview = label(input.text?.toString()?.trim().orEmpty().ifBlank { "输入文字后，这里显示字幕预览。" }, 13, p.text).apply {
+            setPadding(dp(12), dp(10), dp(12), dp(10))
+            background = shape(p.surface, dp(10), p.border, dp(1))
+            visibility = if (ttsSubtitleEnabled) View.VISIBLE else View.GONE
+        }
+        input.addTextChangedListener(object : android.text.TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit
+            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
+                ttsSubtitlePreview?.text = s?.toString()?.trim().orEmpty().ifBlank { "输入文字后，这里显示字幕预览。" }
+            }
+            override fun afterTextChanged(s: android.text.Editable?) = Unit
+        })
+        body.addView(ttsSubtitlePreview, marginTop(6))
+        body.addView(secondaryButton("导出本地语音字幕（SRT）") { exportTtsSubtitle() }, marginTop(6))
+        val shortcuts = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        shortcuts.addView(secondaryButton("导入音频") { chooseAudio() }, LinearLayout.LayoutParams(-1, dp(56)))
         body.addView(shortcuts, marginTop(12))
         body.addView(label("运行状态", 17, p.text, true), marginTop(24))
         status = label("正在初始化系统 TTS…", 13, p.secondary)
@@ -367,7 +391,7 @@ class MainActivity : ComponentActivity() {
         // Rebind the live engine state whenever the TTS workspace is opened.
         if (activeTtsEngineId.isNotBlank()) enginePicker.text = activeTtsEngineLabel + "   ›"
         when {
-            activeTtsEngineId == "native:audio8" -> status.text = "已选择 Audio8 本地引擎；使用前请确认模型已下载并校验。"
+            activeTtsEngineId.startsWith("native:") -> status.text = "已选择本地语音引擎；请确认所选模型已下载并校验。"
             ttsReady -> {
                 status.text = activeTtsEngineLabel + " 已就绪，可以试听。"
                 refreshSystemVoices()
@@ -1353,9 +1377,8 @@ class MainActivity : ComponentActivity() {
         }
         val model = selectedFeatureModel("tts", "audio8-tts-0.6b-q8")
         if (model == null) {
-            Toast.makeText(this, "模型目录中没有 Audio8 TTS 条目", Toast.LENGTH_LONG).show()
-            page = 2
-            render()
+            Toast.makeText(this, "请先在当前页面的模型栏中选择并下载适配的语音模型。", Toast.LENGTH_LONG).show()
+            runOnUiThread { showModelPicker("tts") }
             return
         }
         nativeBusy = true
@@ -1387,6 +1410,7 @@ class MainActivity : ComponentActivity() {
                 val result = JSONObject(NativeEngine.synthesize(text, "zh", output.absolutePath, speechRate, speechPitch))
                 check(result.optBoolean("ok")) { result.optString("error", "语音合成失败") }
                 check(output.isFile && output.length() > 44L) { "合成结果文件无效" }
+                pendingTtsSubtitleSrt = buildWholeAudioSubtitle(text, output)
                 saveProjectRecord("Audio8 本地语音", "TTS", text.take(48), output, "audio/wav")
 
                 runOnUiThread {
@@ -1552,7 +1576,7 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun speak() {
-        if (activeTtsEngineId == "native:audio8") { speakWithLocalModel(); return }
+        if (activeTtsEngineId.startsWith("native:")) { speakWithLocalModel(); return }
         val text = input.text?.toString()?.trim().orEmpty()
         if (text.isBlank()) { Toast.makeText(this, "请先输入要朗读的文字", Toast.LENGTH_SHORT).show(); return }
         val engine = tts
@@ -1614,6 +1638,7 @@ class MainActivity : ComponentActivity() {
                 }.onSuccess { Toast.makeText(this, "识别文本已导出", Toast.LENGTH_SHORT).show() }
                     .onFailure { Toast.makeText(this, "导出失败：" + (it.localizedMessage ?: "未知错误"), Toast.LENGTH_LONG).show() }
                 REQUEST_EXPORT_SRT -> writeTextExport(uri, pendingSubtitleSrt, "SRT 字幕已导出")
+                REQUEST_EXPORT_TTS_SRT -> writeTextExport(uri, pendingTtsSubtitleSrt, "语音字幕已导出")
                 REQUEST_EXPORT_VTT -> writeTextExport(uri, pendingSubtitleVtt, "WebVTT 字幕已导出")
                 REQUEST_EXPORT_CLONE -> copyExport(uri, pendingCloneExport, "克隆语音已导出")
                 REQUEST_EXPORT_MUSIC -> copyExport(uri, pendingMusicExport, "生成音乐已导出")
@@ -2291,5 +2316,6 @@ class MainActivity : ComponentActivity() {
         private const val REQUEST_EXPORT_MUSIC = 4109
         private const val REQUEST_EXPORT_MIDI = 4110
         private const val REQUEST_EXPORT_GENERIC = 4111
+        private const val REQUEST_EXPORT_TTS_SRT = 4117
     }
 }
