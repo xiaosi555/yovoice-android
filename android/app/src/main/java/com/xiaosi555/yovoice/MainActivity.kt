@@ -303,6 +303,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     }
 
     private fun renderCreateWorkspace() {
+        body.removeAllViews()
         val workspaceFeature = activeWorkspaceFeature
         renderHeader("创作 · ${ModelFeatureGuide.features.firstOrNull { it.id == workspaceFeature }?.name ?: "工具"}", "当前功能的独立操作界面")
         body.addView(textButton("‹ 返回功能说明", 13) { activeWorkspaceFeature = null; render() }, marginTop(8))
