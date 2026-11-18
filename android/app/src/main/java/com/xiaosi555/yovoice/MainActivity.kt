@@ -191,6 +191,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
 
         panel.addView(primaryButton("试听朗读（手机 TTS）") { speak() }, marginTop(10))
         panel.addView(secondaryButton("本地语音 · Audio8 TTS") { speakWithLocalModel() }, marginTop(9))
+        panel.addView(secondaryButton("释放本地模型内存") { unloadLocalModel() }, marginTop(8))
         body.addView(panel, marginTop(18))
         val shortcuts = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; weightSum = 2f }
         shortcuts.addView(secondaryButton("导入音频") { chooseAudio() }, LinearLayout.LayoutParams(0, dp(64), 1f))
@@ -358,6 +359,25 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                     }
                 }
             } finally {
+                nativeBusy = false
+            }
+        }
+    }
+
+    private fun unloadLocalModel() {
+        if (nativeBusy) {
+            Toast.makeText(this, "本地引擎正在处理，完成后再释放模型", Toast.LENGTH_SHORT).show()
+            return
+        }
+        nativeBusy = true
+        if (::status.isInitialized) status.text = "正在释放本地模型并回收内存…"
+        nativeExecutor.execute {
+            runCatching { NativeEngine.unload() }
+            runOnUiThread {
+                if (!destroyed && !isFinishing) {
+                    if (::status.isInitialized) status.text = "本地模型已释放；再次使用时会重新加载"
+                    Toast.makeText(this, "本地模型已释放", Toast.LENGTH_SHORT).show()
+                }
                 nativeBusy = false
             }
         }
