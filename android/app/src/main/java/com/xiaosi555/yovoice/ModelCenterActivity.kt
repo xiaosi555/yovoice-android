@@ -185,7 +185,17 @@ class ModelCenterActivity : AppCompatActivity() {
         } else {
             "当前 Android 原生推理引擎尚未成功初始化。模型下载仍会执行文件校验，但引擎可用前不能进行本地推理。"
         }
-        root.addView(infoRow("设备兼容与空间要求", runtimeExplanation), params().apply { topMargin = dp(4); bottomMargin = dp(8) })
+        val compatibilityRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            addView(TextView(this@ModelCenterActivity).apply {
+                text = "设备兼容与空间要求"
+                textSize = 12f
+                setTextColor(secondaryText)
+            }, LinearLayout.LayoutParams(0, dp(48), 1f))
+            addView(infoAction("设备兼容与空间要求", runtimeExplanation), LinearLayout.LayoutParams(dp(48), dp(48)))
+        }
+        root.addView(compatibilityRow, params().apply { topMargin = dp(4); bottomMargin = dp(8) })
 
         val models = ModelCatalog.load(this)
         val search = EditText(this).apply {
@@ -210,6 +220,7 @@ class ModelCenterActivity : AppCompatActivity() {
         if (models.any { it.family !in mappedFamilies }) categories.add("other" to "其他模型")
         var selectedCategory = intent.getStringExtra("focus_feature")
             ?.takeIf { requested -> categories.any { it.first == requested } } ?: "all"
+        var refreshModels: () -> Unit = {}
         val categoryViews = linkedMapOf<String, TextView>()
         val categoryStrip = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
         fun updateCategoryAppearance() {
@@ -236,7 +247,7 @@ class ModelCenterActivity : AppCompatActivity() {
                 text = title
                 textSize = 12f
                 gravity = Gravity.CENTER
-                minHeight = dp(40)
+                minHeight = dp(48)
                 setPadding(dp(14), 0, dp(14), 0)
                 isClickable = true
                 isFocusable = true
@@ -247,7 +258,7 @@ class ModelCenterActivity : AppCompatActivity() {
                 }
             }
             categoryViews[id] = chip
-            categoryStrip.addView(chip, LinearLayout.LayoutParams(-2, dp(40)).apply {
+            categoryStrip.addView(chip, LinearLayout.LayoutParams(-2, dp(48)).apply {
                 rightMargin = dp(7)
             })
         }
@@ -255,7 +266,7 @@ class ModelCenterActivity : AppCompatActivity() {
         root.addView(HorizontalScrollView(this).apply {
             isHorizontalScrollBarEnabled = false
             clipToPadding = false
-            addView(categoryStrip, ViewGroup.LayoutParams(-2, dp(44)))
+            addView(categoryStrip, ViewGroup.LayoutParams(-2, dp(52)))
         }, params().apply { topMargin = dp(4); bottomMargin = dp(8) })
 
         val list = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
@@ -269,7 +280,7 @@ class ModelCenterActivity : AppCompatActivity() {
         }
         list.addView(empty, params())
 
-        fun refreshModels() {
+        refreshModels = {
             val keyword = search.text?.toString()?.trim()?.lowercase(Locale.ROOT).orEmpty()
             val selectedFeature = featureCategories.firstOrNull { it.id == selectedCategory }
             val filtered = models.filter { model ->

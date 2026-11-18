@@ -533,8 +533,7 @@ class MainActivity : AppCompatActivity() {
             selectedCreateFeature = null
             render()
         }, marginTop(8))
-        body.addView(label("功能说明", 16, p.text, true), marginTop(18))
-        body.addView(label(feature.purpose, 13, p.secondary).apply { setLineSpacing(dp(4).toFloat(), 1f) }, marginTop(7))
+        body.addView(section("功能说明", feature.purpose), marginTop(18))
         val models = ModelCatalog.load(this).filter { it.family in feature.modelFamilies }.sortedBy { it.packageSize() }
         val savedModelId = getSharedPreferences("yovoice-model-selection", MODE_PRIVATE).getString(featureId, null)
         // Never present the first catalog entry as the active model: catalog presence is not installation.
@@ -593,7 +592,7 @@ class MainActivity : AppCompatActivity() {
                 else -> { activeWorkspaceFeature = featureId; renderCreateWorkspace() }
             }
         }, marginTop(18))
-        body.addView(label(feature.runtimeNote, 11, p.secondary), marginTop(8))
+        body.addView(section("运行适配说明", feature.runtimeNote), marginTop(8))
     }
 
     private fun renderCreateWorkspace() {
@@ -880,7 +879,7 @@ class MainActivity : AppCompatActivity() {
         }
         content.addView(label("本功能适配的模型按体积从小到大排列；每项显示用途和本机运行时状态。下载完成还会逐文件校验 SHA-256。", 12, p.secondary))
         if (!runtimeReady || compatibleModels.isEmpty()) {
-            content.addView(label("当前设备运行时尚未报告此功能的可用模型家族。下列未适配模型仅供查看，不能作为可运行模型。", 12, 0xFF9A6428.toInt()).apply {
+            content.addView(label("当前设备运行时尚未报告此功能的可用模型家族。下列未适配模型仍可下载保存，但不能作为本机可运行模型。", 12, 0xFF9A6428.toInt()).apply {
                 setPadding(dp(10), dp(8), dp(10), dp(8))
                 background = shape(0x1AFFB74D, dp(10))
             }, marginTop(8))
@@ -957,7 +956,7 @@ class MainActivity : AppCompatActivity() {
                     state.text = when (info?.state) {
                         WorkInfo.State.FAILED -> "下载失败：" + (info?.outputData?.getString("error") ?: "可重试")
                         WorkInfo.State.CANCELLED -> "下载已暂停，可继续"
-                        else -> if (supported) "尚未下载 · 可直接在此下载" else "运行时未适配 · 仅可在模型库查看"
+                        else -> if (supported) "尚未下载 · 可直接在此下载" else "运行时未适配 · 可下载保存，但不能在此设备推理"
                     }
                     action.text = when (info?.state) {
                         WorkInfo.State.FAILED, WorkInfo.State.CANCELLED -> "重试下载"
