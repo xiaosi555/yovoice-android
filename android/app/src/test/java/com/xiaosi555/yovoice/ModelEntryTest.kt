@@ -112,4 +112,34 @@ class ModelEntryTest {
         assertEquals("189.55 MB", ModelEntry.formatBytes(198_757_376L))
         assertEquals("2.00 GB", ModelEntry.formatBytes(2_147_483_648L))
     }
+    @Test
+    fun installedManifestMustMatchEveryCatalogFileExactly() {
+        val single = model()
+        val validSingle = org.json.JSONArray().put(
+            org.json.JSONObject()
+                .put("remotePath", "voices/test model.gguf")
+                .put("localPath", "voices/test model.gguf")
+                .put("size", 100L)
+                .put("sha256", "a".repeat(64))
+        )
+        assertTrue(single.matchesManifestFiles(validSingle))
+        val wrongPath = org.json.JSONArray().put(
+            org.json.JSONObject()
+                .put("remotePath", "other.gguf")
+                .put("localPath", "voices/test model.gguf")
+                .put("size", 100L)
+                .put("sha256", "a".repeat(64))
+        )
+        assertEquals(false, single.matchesManifestFiles(wrongPath))
+
+        val multi = model(files = listOf(
+            ModelAssetFile("model.gguf", 100L, "a".repeat(64), null, null),
+            ModelAssetFile("config.json", 20L, "b".repeat(64), null, null)
+        ))
+        val reversed = org.json.JSONArray()
+            .put(org.json.JSONObject().put("remotePath", "config.json").put("localPath", "config.json").put("size", 20L).put("sha256", "b".repeat(64)))
+            .put(org.json.JSONObject().put("remotePath", "model.gguf").put("localPath", "model.gguf").put("size", 100L).put("sha256", "a".repeat(64)))
+        assertEquals(false, multi.matchesManifestFiles(reversed))
+    }
+
 }
