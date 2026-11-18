@@ -2775,10 +2775,17 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun voiceDisplayName(voice: android.speech.tts.Voice, index: Int): String {
-        val mapped = multiTtsPackage?.speakers?.firstOrNull {
-            it.code.equals(voice.name, true) || voice.name.contains(it.code, true)
+    private fun mappedMultiTtsSpeaker(voice: android.speech.tts.Voice): MultiTtsSpeaker? =
+        multiTtsPackage?.speakers?.firstOrNull { speaker ->
+            voice.name.equals(speaker.id, true) ||
+                voice.name.contains(speaker.id, true) ||
+                voice.name.equals(speaker.code, true) ||
+                voice.name.contains(speaker.code, true)
         }
+
+    private fun voiceDisplayName(voice: android.speech.tts.Voice, index: Int): String {
+        // MultiTTS exposes Speaker.id (not Speaker.code) as Android Voice.name.
+        val mapped = mappedMultiTtsSpeaker(voice)
         if (mapped != null) return mapped.name
         val language = voice.locale.getDisplayLanguage(Locale.SIMPLIFIED_CHINESE).ifBlank { "未知语言" }
         val country = voice.locale.getDisplayCountry(Locale.SIMPLIFIED_CHINESE)
@@ -2824,9 +2831,7 @@ class MainActivity : AppCompatActivity() {
         fun renderRows(query: String) {
             list.removeAllViews()
             val filtered = voices.withIndex().filter { (index, voice) ->
-                val mapped = multiTtsPackage?.speakers?.firstOrNull {
-                    it.code.equals(voice.name, true) || voice.name.contains(it.code, true)
-                }
+                val mapped = mappedMultiTtsSpeaker(voice)
                 val haystack = listOf(
                     voiceDisplayName(voice, index), voice.name, voice.locale.toLanguageTag(),
                     mapped?.description.orEmpty(), mapped?.descText.orEmpty()
@@ -2834,9 +2839,7 @@ class MainActivity : AppCompatActivity() {
                 haystack.contains(query.trim().lowercase(Locale.ROOT))
             }
             filtered.forEach { (index, voice) ->
-                val mapped = multiTtsPackage?.speakers?.firstOrNull {
-                    it.code.equals(voice.name, true) || voice.name.contains(it.code, true)
-                }
+                val mapped = mappedMultiTtsSpeaker(voice)
                 val title = voiceDisplayName(voice, index)
                 val detail = mapped?.let { speaker ->
                     listOfNotNull(
