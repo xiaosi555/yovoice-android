@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cctype>
 #include <cstdint>
 #include <fstream>
 #include <filesystem>
@@ -635,6 +636,74 @@ Java_com_xiaosi555_yovoice_NativeEngine_nativeSeparate(
     audiocpp_result_free(result);
     if (first) return make_string(env, failure_json("分离模型没有返回命名音轨"));
     json << "]}";
+    return make_string(env, json.str());
+}
+
+extern "C" JNIEXPORT jstring JNICALL
+Java_com_xiaosi555_yovoice_NativeEngine_nativeMidi(
+    JNIEnv* env, jobject, jfloatArray pcm_array, jint sample_rate, jint channels,
+    jstring output_path, jstring instruments
+) {
+    UtfChars output(env, output_path);
+    UtfChars instrument_list(env, instruments);
+    if (pcm_array == nullptr || sample_rate <= 0 || channels <= 0 || output.get()[0] == '\0') {
+        return make_string(env, failure_json("MIDI 输入音频或输出路径无效"));
+    }
+    const jsize sample_count = env->GetArrayLength(pcm_array);
+    if (sample_count <= 0 || sample_count > 120000000 || sample_count % channels != 0) {
+        return make_string(env, failure_json("MIDI 输入音频长度或声道布局无效"));
+    }
+    jfloat* samples = env->GetFloatArrayElements(pcm_array, nullptr);
+    if (samples == nullptr) return make_string(env, failure_json("无法读取 MIDI 输入 PCM"));
+    std::lock_guard<std::mutex> lock(g_mutex);
+    if (g_state.session == nullptr || g_state.task != "midi") {
+        env->ReleaseFloatArrayElements(pcm_array, samples, JNI_ABORT);
+        return make_string(env, failure_json("请先加载音频转 MIDI 模型"));
+    }
+    audiocpp_request* request = audiocpp_request_create();
+    if (request == nullptr) {
+        env->ReleaseFloatArrayElements(pcm_array, samples, JNI_ABORT);
+        return make_string(env, failure_json("无法创建 MIDI 转换请求"));
+    }
+    audiocpp_status status = audiocpp_request_set_audio(
+        request, samples, static_cast<size_t>(sample_count) / static_cast<size_t>(channels), sample_rate, channels);
+    env->ReleaseFloatArrayElements(pcm_array, samples, JNI_ABORT);
+    if (status == AUDIOCPP_OK) status = audiocpp_request_set_option(request, "output_format", "midi");
+    if (status == AUDIOCPP_OK && instrument_list.get()[0] != '\0') {
+        status = audiocpp_request_set_option(request, "instruments", instrument_list.get());
+    }
+    if (status != AUDIOCPP_OK) {
+        const std::string message = status_message(status);
+        audiocpp_request_free(request);
+        return make_string(env, failure_json(message));
+    }
+    audiocpp_result* result = nullptr;
+    status = audiocpp_session_run(g_state.session, request, &result);
+    audiocpp_request_free(request);
+    if (status != AUDIOCPP_OK || result == nullptr) {
+        const std::string message = status_message(status);
+        if (result != nullptr) audiocpp_result_free(result);
+        return make_string(env, failure_json(message));
+    }
+    bool written = false;
+    for (size_t i = 0; i < audiocpp_result_artifact_count(result); ++i) {
+        audiocpp_artifact_kind kind = AUDIOCPP_ARTIFACT_CUSTOM;
+        const char* artifact_id = nullptr;
+        const void* payload = nullptr;
+        size_t payload_bytes = 0;
+        if (audiocpp_result_artifact(result, i, &kind, &artifact_id, &payload, &payload_bytes) != AUDIOCPP_OK) continue;
+        if (kind != AUDIOCPP_ARTIFACT_MIDI || payload == nullptr || payload_bytes == 0) continue;
+        std::ofstream stream(output.get(), std::ios::binary | std::ios::trunc);
+        if (!stream) break;
+        stream.write(static_cast<const char*>(payload), static_cast<std::streamsize>(payload_bytes));
+        stream.flush();
+        written = stream.good();
+        break;
+    }
+    audiocpp_result_free(result);
+    if (!written) return make_string(env, failure_json("MIDI 模型没有返回有效 MIDI 数据"));
+    std::ostringstream json;
+    json << "{\"ok\":true,\"path\":\"" << json_escape(output.get()) << "\"}";
     return make_string(env, json.str());
 }
 
