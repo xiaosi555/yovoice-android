@@ -279,6 +279,11 @@ Java_com_xiaosi555_yovoice_NativeEngine_nativeSynthesize(
     if (request == nullptr) return make_string(env, failure_json("无法创建推理请求"));
     const char* language_value = language_name.get()[0] == '\0' ? nullptr : language_name.get();
     audiocpp_status status = audiocpp_request_set_text(request, input_text.get(), language_value);
+    if (status != AUDIOCPP_OK) {
+        const std::string message = status_message(status);
+        audiocpp_request_free(request);
+        return make_string(env, failure_json(message));
+    }
     const bool style_controls_applied = audiocpp_model_supports_style_condition(g_state.model) != 0;
     if (style_controls_applied) {
         status = audiocpp_request_set_speaking_rate(request, speaking_rate);
