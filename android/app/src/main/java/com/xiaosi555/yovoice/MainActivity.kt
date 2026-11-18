@@ -538,9 +538,13 @@ class MainActivity : AppCompatActivity() {
         val savedModelId = getSharedPreferences("yovoice-model-selection", MODE_PRIVATE).getString(featureId, null)
         // Never present the first catalog entry as the active model: catalog presence is not installation.
         val selectedModel = models.firstOrNull { it.id == savedModelId }
-        body.addView(label("当前引擎 / 模型", 13, p.secondary, true), marginTop(18))
+        body.addView(label(if (feature.modelFamilies.isEmpty()) "模型依赖" else "当前引擎 / 模型", 13, p.secondary, true), marginTop(18))
         val modelStateLabel = label(
-            if (selectedModel == null) "尚未选择模型 · 点击选择并下载" else "正在检查本地安装与校验状态…",
+            when {
+                feature.modelFamilies.isEmpty() -> "此功能不需要单独下载本地模型"
+                selectedModel == null -> "尚未选择模型 · 点击查看全部适配模型"
+                else -> "正在检查本地安装与校验状态…"
+            },
             11, p.secondary
         ).apply { setPadding(0, dp(3), 0, 0) }
         val modelRow = LinearLayout(this).apply {
@@ -548,10 +552,11 @@ class MainActivity : AppCompatActivity() {
             gravity = Gravity.CENTER_VERTICAL
             setPadding(dp(13), dp(9), dp(12), dp(9))
             background = ripple(p.surface, dp(13), p.border)
-            isClickable = true
-            isFocusable = true
-            contentDescription = "管理当前功能模型"
+            isClickable = feature.modelFamilies.isNotEmpty()
+            isFocusable = feature.modelFamilies.isNotEmpty()
+            contentDescription = if (feature.modelFamilies.isEmpty()) "此功能不需要本地模型" else "管理当前功能模型"
             setOnClickListener {
+                if (feature.modelFamilies.isEmpty()) return@setOnClickListener
                 val family = selectedModel?.family
                 try {
                     startActivity(Intent(this@MainActivity, ModelCenterActivity::class.java)
@@ -563,12 +568,21 @@ class MainActivity : AppCompatActivity() {
             }
         }
         val modelText = column()
-        modelText.addView(label(selectedModel?.name ?: "尚未选择模型", 13, p.text, true))
-        modelText.addView(label("适配此功能的模型：${models.size} 个 · 按体积从小到大", 11, p.secondary), marginTop(2))
-        selectedModel?.let { modelText.addView(label("用途：" + ModelFeatureGuide.modelPurpose(it.family), 11, p.secondary).apply { maxLines = 2 }, marginTop(2)) }
+        modelText.addView(label(
+            selectedModel?.name ?: if (feature.modelFamilies.isEmpty()) "无需下载模型" else "尚未选择模型",
+            13, p.text, true
+        ))
+        if (feature.modelFamilies.isNotEmpty()) {
+            modelText.addView(label("适配此功能的模型：${models.size} 个 · 按体积从小到大", 11, p.secondary), marginTop(2))
+            selectedModel?.let { modelText.addView(label("用途：" + ModelFeatureGuide.modelPurpose(it.family), 11, p.secondary).apply { maxLines = 2 }, marginTop(2)) }
+        } else {
+            modelText.addView(label("此功能使用在线服务或本地文件，不需要模型下载", 11, p.secondary), marginTop(2))
+        }
         modelText.addView(modelStateLabel, marginTop(2))
         modelRow.addView(modelText, LinearLayout.LayoutParams(0, -2, 1f))
-        modelRow.addView(LineIconView(this, "chevron", p.secondary), LinearLayout.LayoutParams(dp(20), dp(20)))
+        if (feature.modelFamilies.isNotEmpty()) {
+            modelRow.addView(LineIconView(this, "chevron", p.secondary), LinearLayout.LayoutParams(dp(20), dp(20)))
+        }
         body.addView(modelRow, marginTop(7))
         selectedModel?.let { model ->
             // Hash verification can be expensive for multi-GB models; keep it off the UI thread.
@@ -1187,21 +1201,61 @@ class MainActivity : AppCompatActivity() {
 
         val themeCard = card()
         themeCard.addView(section("界面风格", "六套风格沿用桌面端主题的背景、表面和文字层级；明暗模式独立生效。"))
-        val styleGrid = GridLayout(this).apply { columnCount = 3; useDefaultMargins = false }
+        val styleGrid = GridLayout(this).apply { columnCount = 2; useDefaultMargins = false }
         palettes.forEachIndexed { index, palette ->
             val item = LinearLayout(this).apply {
-                orientation = LinearLayout.HORIZONTAL
-                gravity = Gravity.CENTER
-                setPadding(dp(4), dp(8), dp(4), dp(8))
-                background = ripple(palette.surface, dp(12), if (themeIndex == index) p.accent else palette.border)
-                val swatch = View(this@MainActivity).apply { background = shape(palette.bg, dp(5), palette.border, dp(1)) }
-                addView(swatch, LinearLayout.LayoutParams(dp(18), dp(18)))
+                orientation = LinearLayout.VERTICAL
+                setPadding(dp(8), dp(8), dp(8), dp(7))
+                background = ripple(palette.surface, dp(13), if (themeIndex == index) p.accent else palette.border)
+
+                val preview = LinearLayout(this@MainActivity).apply {
+                    orientation = LinearLayout.HORIZONTAL
+                    gravity = Gravity.CENTER_VERTICAL
+                    setPadding(dp(5), dp(4), dp(5), dp(4))
+                    background = shape(palette.bg, dp(8), palette.border, dp(1))
+                }
+                val rail = LinearLayout(this@MainActivity).apply {
+                    orientation = LinearLayout.VERTICAL
+                    gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
+                    setPadding(dp(3), dp(5), dp(3), dp(4))
+                    background = shape(palette.surface, dp(5))
+                    addView(View(this@MainActivity).apply { background = shape(p.accent, dp(4)) },
+                        LinearLayout.LayoutParams(dp(8), dp(8)))
+                    addView(View(this@MainActivity).apply { background = shape(palette.secondary, dp(2)) },
+                        LinearLayout.LayoutParams(dp(14), dp(3)).apply { topMargin = dp(5) })
+                    addView(View(this@MainActivity).apply { background = shape(palette.secondary, dp(2)) },
+                        LinearLayout.LayoutParams(dp(10), dp(3)).apply { topMargin = dp(4) })
+                }
+                preview.addView(rail, LinearLayout.LayoutParams(dp(24), dp(42)))
+
+                val sheet = LinearLayout(this@MainActivity).apply {
+                    orientation = LinearLayout.VERTICAL
+                    gravity = Gravity.CENTER_VERTICAL
+                    setPadding(dp(6), dp(5), dp(6), dp(5))
+                    background = shape(palette.surface, dp(5))
+                    addView(View(this@MainActivity).apply { background = shape(palette.text, dp(2)) },
+                        LinearLayout.LayoutParams(dp(34), dp(4)))
+                    addView(View(this@MainActivity).apply { background = shape(palette.secondary, dp(2)) },
+                        LinearLayout.LayoutParams(dp(54), dp(3)).apply { topMargin = dp(5) })
+                    val actions = LinearLayout(this@MainActivity).apply {
+                        orientation = LinearLayout.HORIZONTAL
+                        gravity = Gravity.CENTER_VERTICAL
+                        addView(View(this@MainActivity).apply { background = shape(p.accent, dp(3)) },
+                            LinearLayout.LayoutParams(dp(20), dp(5)))
+                        addView(View(this@MainActivity).apply { background = shape(palette.secondary, dp(3)) },
+                            LinearLayout.LayoutParams(dp(12), dp(5)).apply { leftMargin = dp(5) })
+                    }
+                    addView(actions, LinearLayout.LayoutParams(-1, dp(6)).apply { topMargin = dp(6) })
+                }
+                preview.addView(sheet, LinearLayout.LayoutParams(0, dp(42), 1f).apply { leftMargin = dp(4) })
+                addView(preview, LinearLayout.LayoutParams(-1, dp(50)))
                 addView(TextView(this@MainActivity).apply {
-                    text = (if (themeIndex == index) "✓ " else "") + palette.name
+                    text = (if (themeIndex == index) "✓  " else "") + palette.name
                     textSize = 12f
                     setTextColor(p.text)
-                    setPadding(dp(5), 0, 0, 0)
-                })
+                    typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
+                    gravity = Gravity.CENTER_VERTICAL
+                }, marginTop(5))
                 setOnClickListener {
                     themeIndex = index
                     getSharedPreferences("yovoice-ui", MODE_PRIVATE).edit().putInt("theme", index).apply()
@@ -1209,10 +1263,10 @@ class MainActivity : AppCompatActivity() {
                 }
             }
             styleGrid.addView(item, GridLayout.LayoutParams(
-                GridLayout.spec(index / 3, 1f), GridLayout.spec(index % 3, 1f)
+                GridLayout.spec(index / 2, 1f), GridLayout.spec(index % 2, 1f)
             ).apply {
                 width = 0
-                height = dp(48)
+                height = dp(86)
                 setMargins(dp(3), dp(4), dp(3), dp(4))
             })
         }
