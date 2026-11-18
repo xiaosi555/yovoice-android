@@ -1,6 +1,7 @@
 package com.xiaosi555.yovoice
 
-import android.app.Activity
+import androidx.activity.ComponentActivity
+import android.app.AlertDialog
 import android.content.Intent
 import android.graphics.Color
 import android.graphics.Typeface
@@ -10,11 +11,14 @@ import android.content.res.ColorStateList
 import android.media.MediaPlayer
 import android.net.Uri
 import android.os.Bundle
+import android.os.SystemClock
+import android.content.res.Configuration
 import android.speech.tts.TextToSpeech
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
 import android.widget.Button
+import android.widget.CheckBox
 import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.GridLayout
@@ -33,9 +37,19 @@ import java.util.Locale
 import java.io.File
 import org.json.JSONObject
 import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
+import androidx.work.Constraints
+import androidx.work.ExistingWorkPolicy
+import androidx.work.NetworkType
+import androidx.work.OneTimeWorkRequestBuilder
+import androidx.work.WorkInfo
+import androidx.work.WorkManager
+import androidx.work.workDataOf
+import java.nio.ByteBuffer
+import java.nio.ByteOrder
 
 /** Mobile studio shell following Yovoice desktop theme tokens and visual hierarchy. */
-class MainActivity : Activity() {
+class MainActivity : ComponentActivity() {
     private var tts: TextToSpeech? = null
     private var ttsReady = false
     private var player: MediaPlayer? = null
@@ -52,6 +66,12 @@ class MainActivity : Activity() {
     private var selectedCreateFeature: String? = null
     private var activeWorkspaceFeature: String? = null
     private var themeIndex = 0
+    private var appearanceMode = "system"
+    private var lastBackPressedAt = 0L
+    private var nativeLoadedModelId: String? = null
+    private var ttsSubtitleEnabled = true
+    private var ttsSubtitlePreview: TextView? = null
+    private var pendingTtsSubtitleSrt = ""
     private var selectedVoiceName: String? = null
     private var availableTtsVoices: List<android.speech.tts.Voice> = emptyList()
     private var speechRate = 1.0f
@@ -96,18 +116,45 @@ class MainActivity : Activity() {
 
     private data class Palette(val name: String, val bg: Int, val surface: Int, val text: Int, val secondary: Int, val accent: Int, val border: Int, val dark: Boolean)
     private val palettes = listOf(
-        Palette("Paper", 0xFFF7F7F7.toInt(), 0xFFFFFFFF.toInt(), 0xFF18181A.toInt(), 0xFF77777D.toInt(), 0xFF18181A.toInt(), 0x1F18181A, false),
-        Palette("Ink", 0xFF0F0F11.toInt(), 0xFF18181B.toInt(), 0xFFEDEDEF.toInt(), 0xFF99999F.toInt(), 0xFFEDEDEF.toInt(), 0x26FFFFFF, true),
-        Palette("Lagoon", 0xFFF1F6F6.toInt(), 0xFFFFFFFF.toInt(), 0xFF0D2427.toInt(), 0xFF61777A.toInt(), 0xFF0B7A80.toInt(), 0x2606272A, false),
-        Palette("Sand", 0xFFF3EEE4.toInt(), 0xFFFBF8F1.toInt(), 0xFF2B241D.toInt(), 0xFF827568.toInt(), 0xFF9A4A24.toInt(), 0x263C2814, false),
-        Palette("Sage", 0xFFEFF3ED.toInt(), 0xFFFFFFFF.toInt(), 0xFF1C2620.toInt(), 0xFF69776D.toInt(), 0xFF3B6B4C.toInt(), 0x261E3223, false),
-        Palette("Abyss", 0xFF04181A.toInt(), 0xFF082427.toInt(), 0xFFE2F2F2.toInt(), 0xFF9BBFC0.toInt(), 0xFF19C3CD.toInt(), 0x26A6F2F5, true)
+        Palette("纸白", 0xFFF7F7F7.toInt(), 0xFFFFFFFF.toInt(), 0xFF18181A.toInt(), 0xFF77777D.toInt(), 0xFF18181A.toInt(), 0x1F18181A, false),
+        Palette("墨黑", 0xFF0F0F11.toInt(), 0xFF18181B.toInt(), 0xFFEDEDEF.toInt(), 0xFF99999F.toInt(), 0xFFEDEDEF.toInt(), 0x26FFFFFF, true),
+        Palette("海湾", 0xFFF1F6F6.toInt(), 0xFFFFFFFF.toInt(), 0xFF0D2427.toInt(), 0xFF61777A.toInt(), 0xFF0B7A80.toInt(), 0x2606272A, false),
+        Palette("暖沙", 0xFFF3EEE4.toInt(), 0xFFFBF8F1.toInt(), 0xFF2B241D.toInt(), 0xFF827568.toInt(), 0xFF9A4A24.toInt(), 0x263C2814, false),
+        Palette("苔绿", 0xFFEFF3ED.toInt(), 0xFFFFFFFF.toInt(), 0xFF1C2620.toInt(), 0xFF69776D.toInt(), 0xFF3B6B4C.toInt(), 0x261E3223, false),
+        Palette("深海", 0xFF04181A.toInt(), 0xFF082427.toInt(), 0xFFE2F2F2.toInt(), 0xFF9BBFC0.toInt(), 0xFF19C3CD.toInt(), 0x26A6F2F5, true)
     )
-    private val p: Palette get() = palettes[themeIndex]
+    private val p: Palette get() {
+        val base = palettes[themeIndex]
+        val dark = when (appearanceMode) {
+            "light" -> false
+            "dark" -> true
+            else -> (resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES
+        }
+        if (dark == base.dark) return base
+        return if (dark) Palette(base.name, mixColor(base.bg, Color.BLACK, 0.86f),
+            mixColor(base.surface, Color.BLACK, 0.82f), 0xFFF1F3F4.toInt(), 0xFFADB5B8.toInt(),
+            base.accent, 0x33FFFFFF, true)
+        else Palette(base.name, mixColor(base.bg, Color.WHITE, 0.88f), 0xFFFFFFFF.toInt(),
+            0xFF202124.toInt(), 0xFF6F7478.toInt(), base.accent, 0x22181818, false)
+    }
+    private fun mixColor(from: Int, to: Int, amount: Float): Int = Color.rgb(
+        (Color.red(from) * (1f - amount) + Color.red(to) * amount).toInt(),
+        (Color.green(from) * (1f - amount) + Color.green(to) * amount).toInt(),
+        (Color.blue(from) * (1f - amount) + Color.blue(to) * amount).toInt()
+    )
+    private fun applySystemBars() {
+        window.statusBarColor = p.bg
+        window.navigationBarColor = p.bg
+        val controller = WindowCompat.getInsetsController(window, window.decorView)
+        controller.isAppearanceLightStatusBars = !p.dark
+        controller.isAppearanceLightNavigationBars = !p.dark
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        themeIndex = getSharedPreferences("yovoice-ui", MODE_PRIVATE).getInt("theme", 0).coerceIn(0, palettes.lastIndex)
+        val uiPrefs = getSharedPreferences("yovoice-ui", MODE_PRIVATE)
+        themeIndex = uiPrefs.getInt("theme", 0).coerceIn(0, palettes.lastIndex)
+        appearanceMode = uiPrefs.getString("appearance", "system") ?: "system"
         val ttsPrefs = getSharedPreferences("yovoice-tts", MODE_PRIVATE)
         val savedEngineId = ttsPrefs.getString("selected_tts_engine_id", "system") ?: "system"
         speechRate = ttsPrefs.getFloat("speech_rate:" + savedEngineId,
@@ -150,8 +197,7 @@ class MainActivity : Activity() {
     }
 
     private fun buildShell() {
-        window.statusBarColor = p.bg
-        window.navigationBarColor = p.bg
+        applySystemBars()
         WindowCompat.setDecorFitsSystemWindows(window, false)
         val root = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setBackgroundColor(p.bg) }
         ViewCompat.setOnApplyWindowInsetsListener(root) { view, insets ->
@@ -174,6 +220,7 @@ class MainActivity : Activity() {
     }
 
     private fun render() {
+        applySystemBars()
         body.animate().cancel()
         body.alpha = 0f
         body.removeAllViews()
