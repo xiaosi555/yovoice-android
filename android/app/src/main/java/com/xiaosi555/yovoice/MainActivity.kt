@@ -49,6 +49,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     private var speechRate = 1.0f
     private var speechPitch = 1.0f
     private lateinit var voicePicker: Spinner
+    private lateinit var enginePicker: TextView
     private lateinit var speedLabel: TextView
     private lateinit var pitchLabel: TextView
 
@@ -134,12 +135,16 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             setPadding(dp(14), dp(14), dp(14), dp(14))
         }
         panel.addView(input, marginTop(14))
-        val engine = TextView(this).apply {
+        enginePicker = TextView(this).apply {
             text = "手机系统语音引擎   ›"
             textSize = 14f; setTextColor(p.text); gravity = Gravity.CENTER_VERTICAL
             setPadding(dp(14), 0, dp(14), 0); background = shape(p.bg, dp(13), p.border, dp(1))
+            isClickable = true
+            isFocusable = true
+            contentDescription = "选择语音引擎"
+            setOnClickListener { showTtsOptions() }
         }
-        panel.addView(engine, LinearLayout.LayoutParams(-1, dp(48)).apply { topMargin = dp(10) })
+        panel.addView(enginePicker, LinearLayout.LayoutParams(-1, dp(48)).apply { topMargin = dp(10) })
 
         panel.addView(label("音色", 13, p.secondary, true), marginTop(12))
         voicePicker = Spinner(this).apply {
@@ -380,7 +385,11 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                         runCatching { tts?.shutdown() }
                         ttsReady = false
                         tts = try { TextToSpeech(applicationContext, this, selected.name) } catch (e: Throwable) { null }
-                        if (tts == null) Toast.makeText(this, "无法启动所选语音引擎", Toast.LENGTH_LONG).show()
+                        if (tts == null) {
+                            Toast.makeText(this, "无法启动所选语音引擎", Toast.LENGTH_LONG).show()
+                        } else if (::enginePicker.isInitialized) {
+                            enginePicker.text = "${labels[which]}   ›"
+                        }
                     }
                     which == engines.size -> launchTtsSettings()
                     else -> try { startActivity(Intent(TextToSpeech.Engine.ACTION_INSTALL_TTS_DATA)) } catch (_: ActivityNotFoundException) { launchTtsSettings() }
@@ -456,6 +465,11 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                 else -> "系统 TTS 已就绪，可以试听。"
             }
             if (::status.isInitialized) status.text = message
+            if (::enginePicker.isInitialized && tts != null) {
+                val activeName = tts?.defaultEngine
+                val activeLabel = tts?.engines.orEmpty().firstOrNull { it.name == activeName }?.label?.toString()
+                enginePicker.text = "${activeLabel?.takeIf(String::isNotBlank) ?: activeName ?: "手机系统语音引擎"}   ›"
+            }
             if (ttsReady && ::voicePicker.isInitialized) refreshSystemVoices()
         }
     }
