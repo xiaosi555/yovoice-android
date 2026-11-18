@@ -53,6 +53,7 @@ class MainActivity : Activity() {
     private var activeWorkspaceFeature: String? = null
     private var themeIndex = 0
     private var selectedVoiceName: String? = null
+    private var availableTtsVoices: List<android.speech.tts.Voice> = emptyList()
     private var speechRate = 1.0f
     private var speechPitch = 1.0f
     private lateinit var voicePicker: Spinner
@@ -235,13 +236,12 @@ class MainActivity : Activity() {
             onItemSelectedListener = object : android.widget.AdapterView.OnItemSelectedListener {
                 override fun onNothingSelected(parent: android.widget.AdapterView<*>?) {}
                 override fun onItemSelected(parent: android.widget.AdapterView<*>?, view: View?, position: Int, id: Long) {
-                    val voices = tts?.voices.orEmpty().filter { !it.isNetworkConnectionRequired }
-                        .sortedWith(compareBy({ !it.locale.language.equals("zh", true) }, { it.name }))
-                    selectedVoiceName = voices.getOrNull(position)?.name
-                    selectedVoiceName?.let { name ->
+                    val voice = availableTtsVoices.getOrNull(position)
+                    selectedVoiceName = voice?.name
+                    voice?.let {
                         getSharedPreferences("yovoice-tts", MODE_PRIVATE).edit()
-                            .putString("voice:" + activeTtsEngineId, name).apply()
-                        voices.firstOrNull { it.name == name }?.let { voice -> runCatching { tts?.voice = voice } }
+                            .putString("voice:" + activeTtsEngineId, it.name).apply()
+                        runCatching { tts?.voice = it }
                     }
                 }
             }
@@ -377,8 +377,13 @@ class MainActivity : Activity() {
         body.addView(label(feature.purpose, 13, p.secondary).apply { setLineSpacing(dp(4).toFloat(), 1f) }, marginTop(7))
         val models = ModelCatalog.load(this).filter { it.family in feature.modelFamilies }.sortedBy { it.packageSize() }
         val savedModelId = getSharedPreferences("yovoice-model-selection", MODE_PRIVATE).getString(featureId, null)
-        val selectedModel = models.firstOrNull { it.id == savedModelId } ?: models.firstOrNull()
+        // Never present the first catalog entry as the active model: catalog presence is not installation.
+        val selectedModel = models.firstOrNull { it.id == savedModelId }
         body.addView(label("当前引擎 / 模型", 13, p.secondary, true), marginTop(18))
+        val modelStateLabel = label(
+            if (selectedModel == null) "尚未选择模型 · 点击选择并下载" else "正在检查本地安装与校验状态…",
+            11, p.secondary
+        ).apply { setPadding(0, dp(3), 0, 0) }
         val modelRow = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
@@ -399,14 +404,26 @@ class MainActivity : Activity() {
             }
         }
         val modelText = column()
-        modelText.addView(label(selectedModel?.name ?: "尚无专用模型", 13, p.text, true))
-        modelText.addView(label(
-            if (selectedModel == null) "可进入模型库查看支持情况" else "${selectedModel.family} · ${selectedModel.formattedSize()} · 点击更换",
-            11, p.secondary
-        ).apply { setPadding(0, dp(3), 0, 0) })
+        modelText.addView(label(selectedModel?.name ?: "尚未选择模型", 13, p.text, true))
+        modelText.addView(modelStateLabel)
         modelRow.addView(modelText, LinearLayout.LayoutParams(0, -2, 1f))
         modelRow.addView(LineIconView(this, "chevron", p.secondary), LinearLayout.LayoutParams(dp(20), dp(20)))
         body.addView(modelRow, marginTop(7))
+        selectedModel?.let { model ->
+            // Hash verification can be expensive for multi-GB models; keep it off the UI thread.
+            storageExecutor.execute {
+                val verified = runCatching { ModelCatalog.isInstalled(this, model) }.getOrDefault(false)
+                runOnUiThread {
+                    if (!destroyed && !isFinishing && modelStateLabel.isAttachedToWindow) {
+                        modelStateLabel.text = if (verified) {
+                            "${model.family} · ${model.formattedSize()} · 文件已安装并通过 SHA-256 校验；运行时仍需任务检测"
+                        } else {
+                            "${model.family} · ${model.formattedSize()} · 未完整安装或校验失败，请在模型库下载/修复"
+                        }
+                    }
+                }
+            }
+        }
         body.addView(primaryButton(feature.actionLabel) {
             when (featureId) {
                 "tts" -> { page = 0; selectedCreateFeature = null; render() }
@@ -1867,6 +1884,7 @@ class MainActivity : Activity() {
     private fun refreshSystemVoices() {
         val voices = runCatching { tts?.voices.orEmpty()
             .sortedWith(compareBy({ !it.locale.language.equals("zh", true) }, { it.isNetworkConnectionRequired }, { it.name })) }.getOrDefault(emptyList())
+        availableTtsVoices = voices
         val names = voices.map { voice ->
             val language = voice.locale.getDisplayLanguage(Locale.SIMPLIFIED_CHINESE)
             val country = voice.locale.getDisplayCountry(Locale.SIMPLIFIED_CHINESE)
