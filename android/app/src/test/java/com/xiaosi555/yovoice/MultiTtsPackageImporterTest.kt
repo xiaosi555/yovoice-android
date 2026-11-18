@@ -76,5 +76,24 @@ class MultiTtsPackageImporterTest {
         assertEquals("克隆引擎", names["clone"])
     }
 
+    @Test
+    fun parsesInlineSpeakerFieldsAndPlainDatExtension() {
+        val yaml = """
+            huoshan:
+              - code: lfeichen
+                desc: LingFeiChen
+                locale: zh-CN
+                name: 聆飞晨
+        """.trimIndent()
+        val speakers = MultiTtsPackageImporter.parseSpeakers(
+            yaml,
+            listOf("isstts/xTTSRes/lfeichen.dat"),
+            emptyMap()
+        )
+        assertEquals(1, speakers.size)
+        assertEquals("聆飞晨", speakers.single().name)
+        assertEquals("isstts/xTTSRes/lfeichen.dat", speakers.single().datPath)
+    }
+
 }
 
