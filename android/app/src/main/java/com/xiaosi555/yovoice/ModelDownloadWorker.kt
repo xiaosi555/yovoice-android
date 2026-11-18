@@ -162,8 +162,32 @@ class ModelDownloadWorker(
                 return
             }
             if (code !in 200..299) throw IOException("下载服务器返回 HTTP $code")
-            val append = offset > 0L && code == HttpURLConnection.HTTP_PARTIAL
-            if (!append) offset = 0L
+            // Never append a partial response unless the server confirms that the
+            // returned byte range starts exactly where our local .part file ends.
+            // A proxy/CDN may ignore or rewrite Range; blindly appending would corrupt
+            // the model and waste the user's bandwidth before SHA-256 catches it.
+            val append = code == HttpURLConnection.HTTP_PARTIAL
+            if (append) {
+                val range = connection.getHeaderField("Content-Range")
+                    ?.trim()
+                    ?.let { Regex("^bytes (\\d+)-(\\d+)/(\\d+)$").matchEntire(it) }
+                    ?: throw IOException("续传响应缺少有效的 Content-Range")
+                val rangeStart = range.groupValues[1].toLongOrNull()
+                    ?: throw IOException("续传起始位置无效")
+                val rangeEnd = range.groupValues[2].toLongOrNull()
+                    ?: throw IOException("续传结束位置无效")
+                val rangeTotal = range.groupValues[3].toLongOrNull()
+                    ?: throw IOException("续传文件总长度无效")
+                if (rangeStart != offset || rangeEnd < rangeStart ||
+                    rangeEnd >= expectedSize || rangeTotal != expectedSize
+                ) {
+                    throw IOException("续传服务器返回的字节范围与本地文件不一致")
+                }
+            } else {
+                // HTTP 200 means the server ignored Range (or returned the full file).
+                // Truncate the stale partial file and restart safely from byte zero.
+                offset = 0L
+            }
             FileOutputStream(part, append).use { output ->
                 connection.inputStream.use { input ->
                     val buffer = ByteArray(256 * 1024)
