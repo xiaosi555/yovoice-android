@@ -159,6 +159,11 @@ class ModelCenterActivity : ComponentActivity() {
         val families = listOf("全部模型") + models.map { it.family }.distinct().sorted()
         val familyPicker = Spinner(this).apply {
             adapter = ArrayAdapter(this@ModelCenterActivity, android.R.layout.simple_spinner_dropdown_item, families)
+            val requestedFamily = intent.getStringExtra("focus_family")
+            if (!requestedFamily.isNullOrBlank()) {
+                val requestedIndex = families.indexOf(requestedFamily)
+                if (requestedIndex > 0) setSelection(requestedIndex)
+            }
         }
         root.addView(familyPicker, params().apply { bottomMargin = dp(8) })
 
@@ -181,7 +186,7 @@ class ModelCenterActivity : ComponentActivity() {
                     (keyword.isEmpty() || model.name.lowercase(Locale.ROOT).contains(keyword) ||
                         model.family.lowercase(Locale.ROOT).contains(keyword) ||
                         model.id.lowercase(Locale.ROOT).contains(keyword))
-            }
+            }.sortedBy { it.packageSize() }
             list.removeAllViews()
             if (filtered.isEmpty()) {
                 empty.visibility = View.VISIBLE
@@ -238,6 +243,18 @@ class ModelCenterActivity : ComponentActivity() {
             textSize = 12f
             setTextColor(secondaryText)
             setPadding(0, dp(4), 0, dp(4))
+        }, params())
+        card.addView(TextView(this).apply {
+            text = "主要用途：${ModelFeatureGuide.modelPurpose(model.family)}"
+            textSize = 12f
+            setTextColor(primaryText)
+            setPadding(0, dp(5), 0, dp(3))
+        }, params())
+        card.addView(TextView(this).apply {
+            text = "对应功能：${ModelFeatureGuide.featureNames(model.family)}"
+            textSize = 11f
+            setTextColor(secondaryText)
+            setPadding(0, dp(2), 0, dp(4))
         }, params())
         card.addView(TextView(this).apply {
             text = if (model.packageSize() >= 2L * 1024 * 1024 * 1024) {
