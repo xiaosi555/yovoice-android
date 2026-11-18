@@ -30,10 +30,11 @@ object NativeEngine {
         family: String,
         task: String,
         mode: String = "offline",
-        threads: Int = Runtime.getRuntime().availableProcessors().coerceIn(1, 4)
+        threads: Int = Runtime.getRuntime().availableProcessors().coerceIn(1, 4),
+        auxiliaryPath: String = ""
     ): String = runCatching {
         ensureLoaded()
-        nativeLoadModel(path, family, task, mode, threads)
+        nativeLoadModel(path, family, task, mode, auxiliaryPath, threads)
     }.getOrElse { errorJson(it) }
 
     fun synthesize(
@@ -117,7 +118,7 @@ object NativeEngine {
     }
 
     private external fun nativeProbe(): String
-    private external fun nativeLoadModel(path: String, family: String, task: String, mode: String, threads: Int): String
+    private external fun nativeLoadModel(path: String, family: String, task: String, mode: String, auxiliaryPath: String, threads: Int): String
     private external fun nativeSynthesize(text: String, language: String, outputPath: String, speakingRate: Float, pitchMultiplier: Float): String
     private external fun nativeTranscribe(pcm: FloatArray, sampleRate: Int, channels: Int, language: String): String
     private external fun nativeClone(text: String, referenceText: String, referencePcm: FloatArray, sampleRate: Int, channels: Int, outputPath: String): String
