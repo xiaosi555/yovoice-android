@@ -60,4 +60,21 @@ class MultiTtsPackageImporterTest {
         assertEquals("男童-新新", speakers.single().name)
         assertFalse(speakers.single().hasLocalData)
     }
+    @Test
+    fun mapsEngineCodeToChineseDisplayNameFromEnginesYaml() {
+        val yaml = """
+            engines:
+              - code: huoshan
+                name: 火山翻译
+                desc: 在线语音引擎
+              - code: clone
+                name: 克隆引擎
+                desc: 本地语音引擎
+        """.trimIndent()
+        val names = MultiTtsPackageImporter.parseEngineNames(yaml)
+        assertEquals("火山翻译", names["huoshan"])
+        assertEquals("克隆引擎", names["clone"])
+    }
+
 }
+
