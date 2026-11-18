@@ -556,8 +556,8 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             return
         }
         val model = ModelCatalog.load(this).firstOrNull { it.id == "audio8-tts-0.6b-q8" }
-        if (model == null || !ModelCatalog.isInstalled(this, model)) {
-            Toast.makeText(this, "请先到模型中心下载 Audio8 TTS 模型（约 1.43 GB）", Toast.LENGTH_LONG).show()
+        if (model == null) {
+            Toast.makeText(this, "模型目录中没有 Audio8 TTS 条目", Toast.LENGTH_LONG).show()
             page = 2
             render()
             return
@@ -566,6 +566,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         if (::status.isInitialized) status.text = "正在检查 Android 原生语音引擎…"
         nativeExecutor.execute {
             try {
+                check(ModelCatalog.isInstalled(this, model)) { "请先到模型中心下载 Audio8 TTS 模型（约 1.43 GB）" }
                 val probe = JSONObject(NativeEngine.probe())
                 check(probe.optString("status") == "ready") {
                     probe.optString("message", "Android 原生引擎不可用")
