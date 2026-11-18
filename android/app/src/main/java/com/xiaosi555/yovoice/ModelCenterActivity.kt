@@ -1,6 +1,7 @@
 package com.xiaosi555.yovoice
 
 import android.os.Bundle
+import android.content.Intent
 import android.content.res.ColorStateList
 import android.graphics.drawable.GradientDrawable
 import android.view.Gravity
