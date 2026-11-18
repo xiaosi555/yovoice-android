@@ -132,6 +132,8 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             0 -> renderStudio()
             1 -> renderCreate()
             2 -> renderModels()
+            3 -> renderSettings()
+            4 -> renderProjects()
             else -> renderSettings()
         }
         renderNav()
@@ -408,6 +410,46 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         body.addView(label("建议先从轻量模型开始。大型模型下载前请确认存储空间；实际推理能力取决于模型家族适配和设备资源。", 12, p.secondary), marginTop(14))
     }
 
+    private fun renderProjects() {
+        renderHeader("项目", "本地草稿、生成记录与作品导出")
+        val records = ProjectStore.list(this)
+        if (records.isEmpty()) {
+            body.addView(label("这里会保存语音、故事配音、音乐、音轨、MIDI 和转录项目。", 13, p.secondary), marginTop(22))
+            return
+        }
+        val formatter = java.text.SimpleDateFormat("yyyy-MM-dd HH:mm", java.util.Locale.getDefault())
+        records.forEach { record ->
+            val item = card()
+            item.addView(label(record.title, 16, p.text, true))
+            item.addView(label(record.category + " · " + record.detail, 12, p.secondary).apply {
+                setPadding(0, dp(5), 0, 0)
+            })
+            item.addView(label(formatter.format(java.util.Date(record.createdAt)), 11, p.secondary), marginTop(5))
+            val file = File(record.filePath)
+            if (file.isFile) {
+                val actions = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+                if (record.mimeType.startsWith("audio/") && record.mimeType != "audio/midi") {
+                    actions.addView(textButton("试听", 12) { playAudio(Uri.fromFile(file)) }, LinearLayout.LayoutParams(0, dp(42), 1f))
+                }
+                actions.addView(textButton("导出", 12) {
+                    launchFileExport(file, record.mimeType, file.name, REQUEST_EXPORT_GENERIC)
+                }, LinearLayout.LayoutParams(0, dp(42), 1f))
+                actions.addView(textButton("删除", 12) {
+                    ProjectStore.delete(this, record.id)
+                    render()
+                }, LinearLayout.LayoutParams(0, dp(42), 1f))
+                item.addView(actions, marginTop(8))
+            } else {
+                item.addView(label("文件已不存在，可删除此历史记录。", 12, p.secondary), marginTop(8))
+                item.addView(textButton("删除记录", 12) {
+                    ProjectStore.delete(this, record.id)
+                    render()
+                }, marginTop(6))
+            }
+            body.addView(item, marginTop(10))
+        }
+    }
+
     private fun renderSettings() {
         renderHeader("设置", "外观与设备语音服务")
         body.addView(label("界面主题", 17, p.text, true), marginTop(22))
@@ -434,12 +476,17 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         body.addView(label("主题名称与颜色沿用 Yovoice 桌面版主题体系；移动端针对单手操作重新排布。", 12, p.secondary), marginTop(18))
     }
 
+    private fun saveProjectRecord(title: String, category: String, detail: String, file: File, mime: String) {
+        runCatching { ProjectStore.save(this, title, category, detail, file, mime) }
+    }
+
     private fun renderNav() {
         nav.removeAllViews()
-        listOf("⌂" to "工作室", "♫" to "创作", "▦" to "模型", "⚙" to "设置").forEachIndexed { index, pair ->
-            val item = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER; setOnClickListener { page = index; render() } }
-            item.addView(LineIconView(this, arrayOf("home", "wave", "grid", "settings")[index], if (page == index) p.accent else p.secondary), LinearLayout.LayoutParams(dp(24), dp(24)))
-            item.addView(label(pair.second, 11, if (page == index) p.accent else p.secondary, page == index).apply { gravity = Gravity.CENTER; setPadding(0, dp(2), 0, 0) })
+        listOf("⌂" to "工作室", "♫" to "创作", "▦" to "模型", "▤" to "项目", "⚙" to "设置").forEachIndexed { index, pair ->
+            val targetPage = if (index == 4) 3 else if (index == 3) 4 else index
+            val item = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER; setOnClickListener { page = targetPage; render() } }
+            item.addView(LineIconView(this, arrayOf("home", "wave", "grid", "folder", "settings")[index], if (page == targetPage) p.accent else p.secondary), LinearLayout.LayoutParams(dp(24), dp(24)))
+            item.addView(label(pair.second, 11, if (page == targetPage) p.accent else p.secondary, page == targetPage).apply { gravity = Gravity.CENTER; setPadding(0, dp(2), 0, 0) })
             nav.addView(item, LinearLayout.LayoutParams(0, -1, 1f))
         }
     }
