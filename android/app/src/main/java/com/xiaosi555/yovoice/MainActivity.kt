@@ -39,6 +39,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     private var destroyed = false
     @Volatile private var nativeBusy = false
     private val nativeExecutor = Executors.newSingleThreadExecutor()
+    private val assistantExecutor = Executors.newSingleThreadExecutor()
     private lateinit var body: LinearLayout
     private lateinit var input: EditText
     private lateinit var status: TextView
@@ -244,6 +245,30 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         body.addView(toolRow("文字转语音", "选择手机系统 TTS 或本地 Audio8 引擎") { page = 0; render() }, marginTop(18))
         body.addView(toolRow("导入本地音频", "选择手机中的音频文件并播放") { chooseAudio() }, marginTop(10))
         body.addView(toolRow("模型与音色", "下载模型、查看本地安装状态") { page = 2; render() }, marginTop(10))
+        val assistantPanel = card()
+        assistantPanel.addView(section("AI 创作助手", "使用你配置的兼容服务，辅助润色、扩写、分镜和提示词"))
+        val assistantInput = EditText(this).apply {
+            hint = "输入创作内容或需求，例如：将这段文案改写得更有画面感…"
+            minLines = 3; gravity = Gravity.TOP; textSize = 14f
+            setTextColor(p.text); setHintTextColor(p.secondary)
+            background = shape(p.bg, dp(12), p.border, dp(1))
+            setPadding(dp(12), dp(12), dp(12), dp(12))
+        }
+        attachDraft(assistantInput, "assistant.prompt")
+        assistantPanel.addView(assistantInput, marginTop(12))
+        val assistantOutput = TextView(this).apply {
+            text = "AI 回复会显示在这里。请先在设置中配置服务地址、模型和 API Key。"
+            textSize = 14f; setTextColor(p.text); setTextIsSelectable(true)
+            setPadding(dp(12), dp(12), dp(12), dp(12))
+            background = shape(p.bg, dp(12), p.border, dp(1))
+        }
+        assistantPanel.addView(assistantOutput, marginTop(8))
+        assistantPanel.addView(primaryButton("开始 AI 辅助创作") {
+            val prompt = assistantInput.text?.toString()?.trim().orEmpty()
+            if (prompt.isBlank()) Toast.makeText(this, "请先输入创作需求", Toast.LENGTH_SHORT).show()
+            else requestAssistant(prompt, assistantOutput)
+        }, marginTop(10))
+        body.addView(assistantPanel, marginTop(10))
         val clonePanel = card()
         clonePanel.addView(section("声音克隆", "Audio8 零样本克隆 · 需要参考音频及其准确转录文本"))
         cloneTextInput = EditText(this).apply {
@@ -478,7 +503,108 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         body.addView(infoRow("手机系统 TTS", if (ttsReady) "已就绪" else "未就绪或正在检测"), marginTop(8))
         body.addView(secondaryButton("选择语音引擎 / 打开系统语音设置") { showTtsOptions() }, marginTop(8))
         body.addView(infoRow("Android 本地推理引擎", "Audio8 TTS · Qwen3 ASR 0.6B"), marginTop(8))
+        body.addView(label("AI 助手服务", 17, p.text, true), marginTop(24))
+        val assistantPrefs = getSharedPreferences("yovoice-assistant", MODE_PRIVATE)
+        val endpointInput = EditText(this).apply {
+            hint = "API 地址，例如 https://api.openai.com/v1"
+            setText(assistantPrefs.getString("endpoint", "https://api.openai.com/v1"))
+            textSize = 14f; setTextColor(p.text); setHintTextColor(p.secondary)
+            background = shape(p.surface, dp(12), p.border, dp(1)); setPadding(dp(12), dp(10), dp(12), dp(10))
+            inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_URI
+        }
+        body.addView(endpointInput, marginTop(8))
+        val modelInput = EditText(this).apply {
+            hint = "模型名称，例如 gpt-4o-mini"
+            setText(assistantPrefs.getString("model", "gpt-4o-mini"))
+            textSize = 14f; setTextColor(p.text); setHintTextColor(p.secondary)
+            background = shape(p.surface, dp(12), p.border, dp(1)); setPadding(dp(12), dp(10), dp(12), dp(10))
+        }
+        body.addView(modelInput, marginTop(8))
+        val keyInput = EditText(this).apply {
+            hint = "API Key（仅保存在本机应用私有配置中）"
+            setText(assistantPrefs.getString("api_key", ""))
+            textSize = 14f; setTextColor(p.text); setHintTextColor(p.secondary)
+            inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD
+            background = shape(p.surface, dp(12), p.border, dp(1)); setPadding(dp(12), dp(10), dp(12), dp(10))
+        }
+        body.addView(keyInput, marginTop(8))
+        body.addView(secondaryButton("保存 AI 服务配置") {
+            val endpoint = endpointInput.text.toString().trim().trimEnd('/')
+            val model = modelInput.text.toString().trim()
+            val key = keyInput.text.toString().trim()
+            if (!endpoint.startsWith("https://") || model.isBlank() || key.isBlank()) {
+                Toast.makeText(this, "请填写 HTTPS 地址、模型名称和 API Key", Toast.LENGTH_LONG).show()
+            } else {
+                assistantPrefs.edit().putString("endpoint", endpoint).putString("model", model).putString("api_key", key).apply()
+                Toast.makeText(this, "AI 服务配置已保存在本机", Toast.LENGTH_SHORT).show()
+            }
+        }, marginTop(10))
+        body.addView(secondaryButton("清除本机保存的 API Key") {
+            assistantPrefs.edit().remove("api_key").apply(); keyInput.setText("")
+            Toast.makeText(this, "已清除本机 API Key", Toast.LENGTH_SHORT).show()
+        }, marginTop(6))
         body.addView(label("主题名称与颜色沿用 Yovoice 桌面版主题体系；移动端针对单手操作重新排布。", 12, p.secondary), marginTop(18))
+    }
+
+    private fun requestAssistant(prompt: String, output: TextView) {
+        val prefs = getSharedPreferences("yovoice-assistant", MODE_PRIVATE)
+        val endpoint = prefs.getString("endpoint", "https://api.openai.com/v1").orEmpty().trim().trimEnd('/')
+        val model = prefs.getString("model", "gpt-4o-mini").orEmpty().trim()
+        val apiKey = prefs.getString("api_key", "").orEmpty().trim()
+        if (!endpoint.startsWith("https://") || model.isBlank() || apiKey.isBlank()) {
+            Toast.makeText(this, "请先到设置配置 HTTPS 服务地址、模型和 API Key", Toast.LENGTH_LONG).show()
+            page = 3
+            render()
+            return
+        }
+        output.text = "正在请求 AI 服务…"
+        assistantExecutor.execute {
+            val result = runCatching {
+                val target = if (endpoint.endsWith("/chat/completions")) endpoint else endpoint + "/chat/completions"
+                val connection = (java.net.URL(target).openConnection() as java.net.HttpURLConnection).apply {
+                    requestMethod = "POST"
+                    connectTimeout = 20_000
+                    readTimeout = 120_000
+                    doOutput = true
+                    setRequestProperty("Authorization", "Bearer " + apiKey)
+                    setRequestProperty("Content-Type", "application/json; charset=utf-8")
+                }
+                try {
+                    val payload = JSONObject().apply {
+                        put("model", model)
+                        put("messages", org.json.JSONArray()
+                            .put(JSONObject().put("role", "system").put("content", "你是 Yovoice 的中文创作助手。请准确理解用户目标，提供可直接使用的创作结果；如信息不足，简洁说明假设。"))
+                            .put(JSONObject().put("role", "user").put("content", prompt)))
+                        put("temperature", 0.7)
+                    }.toString()
+                    connection.outputStream.use { it.write(payload.toByteArray(Charsets.UTF_8)) }
+                    val code = connection.responseCode
+                    val stream = if (code in 200..299) connection.inputStream else connection.errorStream
+                    val response = stream?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }.orEmpty()
+                    check(code in 200..299) {
+                        val detail = runCatching { JSONObject(response).optJSONObject("error")?.optString("message") }.getOrNull()
+                        "AI 服务返回 HTTP " + code + if (!detail.isNullOrBlank()) "：" + detail else ""
+                    }
+                    val json = JSONObject(response)
+                    val message = json.optJSONArray("choices")?.optJSONObject(0)?.optJSONObject("message")
+                    val content = message?.opt("content")
+                    val answer = when (content) {
+                        is String -> content
+                        is org.json.JSONArray -> (0 until content.length()).mapNotNull { index ->
+                            content.optJSONObject(index)?.optString("text")?.takeIf { it.isNotBlank() }
+                        }.joinToString("\n")
+                        else -> ""
+                    }
+                    check(answer.isNotBlank()) { "服务已响应，但没有返回可显示的文本内容" }
+                    answer
+                } finally {
+                    connection.disconnect()
+                }
+            }.fold({ it }, { "请求失败：" + (it.message ?: it.javaClass.simpleName) })
+            runOnUiThread {
+                if (!destroyed && !isFinishing) output.text = result
+            }
+        }
     }
 
     private fun attachDraft(editText: EditText, key: String) {
@@ -1382,6 +1508,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             nativeExecutor.execute { NativeEngine.unload() }
             nativeExecutor.shutdown()
         }
+        assistantExecutor.shutdownNow()
         runCatching { tts?.stop() }; runCatching { tts?.shutdown() }; tts = null
         super.onDestroy()
     }
