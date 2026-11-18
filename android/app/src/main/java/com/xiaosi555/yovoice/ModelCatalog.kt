@@ -4,6 +4,8 @@ import android.content.Context
 import org.json.JSONObject
 import java.io.File
 import java.util.Locale
+import java.io.FileInputStream
+import java.security.MessageDigest
 
 data class ModelAssetFile(
     val path: String,
@@ -154,6 +156,19 @@ object ModelCatalog {
         return installed
     }
 
+    private fun sha256(file: File): String {
+        val digest = MessageDigest.getInstance("SHA-256")
+        FileInputStream(file).use { input ->
+            val buffer = ByteArray(1024 * 1024)
+            while (true) {
+                val count = input.read(buffer)
+                if (count < 0) break
+                digest.update(buffer, 0, count)
+            }
+        }
+        return digest.digest().joinToString("") { "%02x".format(it) }
+    }
+
     fun isInstalled(context: Context, model: ModelEntry): Boolean {
         val root = installedDirectory(context, model.id)
         val manifest = File(root, "yovoice-model.json")
@@ -167,8 +182,14 @@ object ModelCatalog {
             if (files.length() != model.packageFiles().size) return false
             for (i in 0 until files.length()) {
                 val entry = files.getJSONObject(i)
-                val file = File(root, entry.getString("localPath"))
+                val relativePath = entry.getString("localPath")
+                val normalized = relativePath.replace('\\', '/')
+                if (normalized.isBlank() || normalized.split('/').any { it.isBlank() || it == "." || it == ".." }) return false
+                val file = File(root, normalized)
                 if (!file.isFile || file.length() != entry.getLong("size")) return false
+                val expectedHash = entry.optString("sha256", "")
+                if (!expectedHash.matches(Regex("[a-fA-F0-9]{64}"))) return false
+                if (!sha256(file).equals(expectedHash, ignoreCase = true)) return false
             }
             true
         }.getOrDefault(false)
