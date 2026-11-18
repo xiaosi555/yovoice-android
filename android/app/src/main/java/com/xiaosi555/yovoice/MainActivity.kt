@@ -52,6 +52,9 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     private lateinit var enginePicker: TextView
     private lateinit var speedLabel: TextView
     private lateinit var pitchLabel: TextView
+    private var asrStatusView: TextView? = null
+    private var asrResultView: TextView? = null
+    private var pendingTextExport: String = ""
 
     private data class Palette(val name: String, val bg: Int, val surface: Int, val text: Int, val secondary: Int, val accent: Int, val border: Int, val dark: Boolean)
     private val palettes = listOf(
@@ -211,7 +214,16 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         body.addView(toolRow("导入本地音频", "选择手机中的音频文件并播放") { chooseAudio() }, marginTop(10))
         body.addView(toolRow("模型与音色", "下载模型、查看本地安装状态") { page = 2; render() }, marginTop(10))
         body.addView(toolRow("声音克隆", "需要接入对应的 Android 声音克隆推理后端") { showFeaturePending("声音克隆") }, marginTop(10))
-        body.addView(toolRow("字幕识别 / 转录", "导入音视频并生成字幕的 Android 后端待适配") { showFeaturePending("字幕识别 / 转录") }, marginTop(10))
+        body.addView(toolRow("音频 / 视频转文字", "使用本地 Qwen3 ASR 识别音轨，支持常见音频与视频容器") { chooseAsrMedia() }, marginTop(10))
+        asrStatusView = label("尚未选择待识别的音频或视频文件。", 12, p.secondary)
+        body.addView(asrStatusView, marginTop(8))
+        asrResultView = label("识别结果将在此显示。", 14, p.text).apply {
+            setTextIsSelectable(true)
+            setPadding(dp(12), dp(12), dp(12), dp(12))
+            background = shape(p.surface, dp(12), p.border, dp(1))
+        }
+        body.addView(asrResultView, marginTop(8))
+        body.addView(secondaryButton("导出识别文本 TXT") { exportTranscript() }, marginTop(8))
         body.addView(toolRow("音轨分离 / 音乐 / MIDI", "桌面版模块纳入移植清单，尚未完成 Android 后端") { showFeaturePending("音轨分离 / 音乐 / MIDI") }, marginTop(10))
         body.addView(label("未完成 Android 引擎适配的功能会明确标注，不会伪装成可用。", 12, p.secondary), marginTop(18))
     }
@@ -459,11 +471,99 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     @Deprecated("System document picker callback")
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
-        if (requestCode == REQUEST_AUDIO && resultCode == RESULT_OK) data?.data?.let { uri ->
+        if (resultCode == RESULT_OK && data?.data != null) {
+            val uri = data.data!!
             try { contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION) } catch (_: Exception) {}
-            playAudio(uri)
+            when (requestCode) {
+                REQUEST_AUDIO -> playAudio(uri)
+                REQUEST_ASR_MEDIA -> transcribeMedia(uri)
+                REQUEST_EXPORT_TXT -> runCatching {
+                    contentResolver.openOutputStream(uri)?.bufferedWriter(Charsets.UTF_8)?.use { it.write(pendingTextExport) }
+                        ?: error("无法创建导出文件")
+                }.onSuccess { Toast.makeText(this, "识别文本已导出", Toast.LENGTH_SHORT).show() }
+                    .onFailure { Toast.makeText(this, "导出失败：" + (it.localizedMessage ?: "未知错误"), Toast.LENGTH_LONG).show() }
+            }
         }
     }
+    private fun chooseAsrMedia() {
+        val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+            addCategory(Intent.CATEGORY_OPENABLE)
+            type = "*/*"
+            putExtra(Intent.EXTRA_MIME_TYPES, arrayOf("audio/*", "video/*"))
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION)
+        }
+        startActivityForResult(intent, REQUEST_ASR_MEDIA)
+    }
+
+    private fun exportTranscript() {
+        if (pendingTextExport.isBlank()) {
+            Toast.makeText(this, "请先完成一次语音识别", Toast.LENGTH_SHORT).show()
+            return
+        }
+        val intent = Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
+            addCategory(Intent.CATEGORY_OPENABLE)
+            type = "text/plain"
+            putExtra(Intent.EXTRA_TITLE, "yovoice-transcript.txt")
+        }
+        startActivityForResult(intent, REQUEST_EXPORT_TXT)
+    }
+
+    private fun transcribeMedia(uri: Uri) {
+        if (nativeBusy) {
+            Toast.makeText(this, "本地推理引擎正在处理，请稍候", Toast.LENGTH_SHORT).show()
+            return
+        }
+        val model = runCatching { ModelCatalog.load(this).firstOrNull { it.id == "qwen3-asr-0.6b-q8" } }.getOrNull()
+        if (model == null || !ModelCatalog.isInstalled(this, model)) {
+            Toast.makeText(this, "请先在模型中心下载 Qwen3 ASR 0.6B 模型包", Toast.LENGTH_LONG).show()
+            page = 2
+            render()
+            return
+        }
+        nativeBusy = true
+        asrStatusView?.text = "正在解码音轨并转换为 16 kHz 单声道 PCM…"
+        asrResultView?.text = "正在准备识别…"
+        nativeExecutor.execute {
+            try {
+                val pcm = AndroidAudioDecoder.decodeTo16kMono(this, uri)
+                runOnUiThread {
+                    if (!destroyed && !isFinishing) asrStatusView?.text =
+                        "音频解码完成 · " + (pcm.size / 16_000) + " 秒 · 正在加载 Qwen3 ASR…"
+                }
+                val modelRoot = ModelCatalog.installedDirectory(this, model.id)
+                val modelFile = File(modelRoot, model.localRelativePath(model.remotePath))
+                check(modelFile.isFile) { "ASR 模型文件不存在，请重新下载模型" }
+                val loaded = JSONObject(NativeEngine.loadTaskModel(modelFile.absolutePath, model.family, "asr", "offline"))
+                check(loaded.optBoolean("ok")) { loaded.optString("error", "ASR 模型加载失败") }
+                runOnUiThread {
+                    if (!destroyed && !isFinishing) asrStatusView?.text = "模型已加载，正在识别音频…"
+                }
+                val result = JSONObject(NativeEngine.transcribe(pcm, 16_000, 1, ""))
+                check(result.optBoolean("ok")) { result.optString("error", "语音识别失败") }
+                val transcript = result.optString("text").trim()
+                check(transcript.isNotBlank()) { "模型没有返回识别文本" }
+                pendingTextExport = transcript
+                runOnUiThread {
+                    if (!destroyed && !isFinishing) {
+                        asrResultView?.text = transcript
+                        asrStatusView?.text = "本地识别完成 · Qwen3 ASR 0.6B · " + transcript.length + " 字"
+                        Toast.makeText(this, "语音识别完成", Toast.LENGTH_SHORT).show()
+                    }
+                }
+            } catch (error: Throwable) {
+                runOnUiThread {
+                    if (!destroyed && !isFinishing) {
+                        asrStatusView?.text = "识别失败：" + (error.localizedMessage ?: error.javaClass.simpleName)
+                        asrResultView?.text = "请检查文件是否含有可解码音轨、模型是否完整，以及设备剩余内存。"
+                        Toast.makeText(this, "本地 ASR 处理失败", Toast.LENGTH_LONG).show()
+                    }
+                }
+            } finally {
+                nativeBusy = false
+            }
+        }
+    }
+
     private fun playAudio(uri: Uri) {
         releasePlayer()
         try {
@@ -519,5 +619,9 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         runCatching { tts?.stop() }; runCatching { tts?.shutdown() }; tts = null
         super.onDestroy()
     }
-    companion object { private const val REQUEST_AUDIO = 4102 }
+    companion object {
+        private const val REQUEST_AUDIO = 4102
+        private const val REQUEST_ASR_MEDIA = 4103
+        private const val REQUEST_EXPORT_TXT = 4104
+    }
 }
