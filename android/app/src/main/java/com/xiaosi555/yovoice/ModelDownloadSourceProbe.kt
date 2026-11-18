@@ -42,7 +42,7 @@ object ModelDownloadSourceProbe {
         }
     }
 
-    private fun probe(source: String, label: String, uri: String, expectedSize: Long): DownloadSourceSpeed? {
+    internal fun probe(source: String, label: String, uri: String, expectedSize: Long): DownloadSourceSpeed? {
         val countLimit = minOf(PROBE_BYTES.toLong(), expectedSize).coerceAtLeast(1L)
         val connection = runCatching { URL(uri).openConnection() as HttpURLConnection }.getOrNull() ?: return null
         return try {
@@ -56,6 +56,21 @@ object ModelDownloadSourceProbe {
             val started = System.nanoTime()
             val status = connection.responseCode
             if (status !in 200..299) return null
+            // A 206 response must prove that it returned the requested first byte range
+            // for this exact asset. Some mirrors/CDNs return a cached or rewritten range;
+            // counting those bytes would make an invalid endpoint look deceptively fast.
+            if (status == HttpURLConnection.HTTP_PARTIAL) {
+                val range = connection.getHeaderField("Content-Range")
+                    ?.trim()
+                    ?.let { Regex("^bytes (\\d+)-(\\d+)/(\\d+)$").matchEntire(it) }
+                    ?: return null
+                val start = range.groupValues[1].toLongOrNull() ?: return null
+                val end = range.groupValues[2].toLongOrNull() ?: return null
+                val total = range.groupValues[3].toLongOrNull() ?: return null
+                if (start != 0L || end != countLimit - 1L || total != expectedSize) return null
+            } else if (status != HttpURLConnection.HTTP_OK) {
+                return null
+            }
             val input = connection.inputStream
             val buffer = ByteArray(32 * 1024)
             var received = 0L
@@ -67,7 +82,7 @@ object ModelDownloadSourceProbe {
                 }
             }
             val elapsed = ((System.nanoTime() - started).coerceAtLeast(1L)) / 1_000_000_000.0
-            if (received <= 0L) null else DownloadSourceSpeed(source, label, received / elapsed)
+            if (received != countLimit) null else DownloadSourceSpeed(source, label, received / elapsed)
         } catch (_: Exception) {
             null
         } finally {
