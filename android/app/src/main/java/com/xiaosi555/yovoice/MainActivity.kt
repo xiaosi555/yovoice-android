@@ -69,6 +69,7 @@ class MainActivity : ComponentActivity() {
     private var appearanceMode = "system"
     private var lastBackPressedAt = 0L
     private var nativeLoadedModelId: String? = null
+    private var activeModelStatusView: TextView? = null
     private var ttsSubtitleEnabled = true
     private var ttsSubtitlePreview: TextView? = null
     private var pendingTtsSubtitleSrt = ""
@@ -769,12 +770,14 @@ class MainActivity : ComponentActivity() {
         val copy = column()
         copy.addView(label("本地模型", 11, p.secondary, true))
         copy.addView(label(selected?.name ?: "尚未选择 · 点击推荐模型", 14, p.text, true), marginTop(3))
+        val isInUse = selected != null && nativeLoadedModelId == selected.id && (featureId != "tts" || activeTtsEngineId.startsWith("native:"))
         val modelState = label(
             if (selected == null) "推荐适配模型 · 可在此下载"
-            else if (nativeLoadedModelId == selected.id && (featureId != "tts" || activeTtsEngineId.startsWith("native:"))) "● 正在使用"
+            else if (isInUse) "● 正在使用"
             else selected.family + " · " + selected.formattedSize() + " · 点击更换或下载",
-            11, if (selected != null && nativeLoadedModelId == selected.id) 0xFF238A59.toInt() else p.secondary
+            11, if (isInUse) 0xFF238A59.toInt() else p.secondary
         )
+        activeModelStatusView = modelState
         copy.addView(modelState, marginTop(2))
         row.addView(copy, LinearLayout.LayoutParams(0, -2, 1f))
         row.addView(LineIconView(this, "chevron", p.secondary), LinearLayout.LayoutParams(dp(20), dp(20)))
@@ -899,12 +902,7 @@ class MainActivity : ComponentActivity() {
                 } else if (installed) {
                     if (!supported) return@setOnClickListener
                     getSharedPreferences("yovoice-model-selection", MODE_PRIVATE).edit().putString(featureId, model.id).apply()
-                    if (featureId == "tts" && model.family == "audio8_tts") {
-                        activeTtsEngineId = "native:audio8"
-                        activeTtsEngineLabel = "Audio8 本地语音"
-                        selectedVoiceName = null
-                        getSharedPreferences("yovoice-tts", MODE_PRIVATE).edit().putString("selected_tts_engine_id", activeTtsEngineId).apply()
-                    }
+                    if (featureId == "tts" && model.family == "audio8_tts") activateNativeTtsEngine()
                     dialog.dismiss()
                     render()
                 } else {
@@ -940,6 +938,39 @@ class MainActivity : ComponentActivity() {
             }
         }
         dialog.show()
+    }
+
+
+    private fun markNativeModelInUse(model: ModelEntry) {
+        nativeLoadedModelId = model.id
+        runOnUiThread {
+            activeModelStatusView?.takeIf { it.isAttachedToWindow }?.apply {
+                text = "● 正在使用 · 已加载到本地引擎"
+                setTextColor(0xFF238A59.toInt())
+            }
+        }
+    }
+
+    private fun activateNativeTtsEngine() {
+        nativeLoadedModelId = null
+        ++ttsGeneration
+        runCatching { tts?.stop() }
+        runCatching { tts?.shutdown() }
+        tts = null
+        ttsReady = false
+        activeTtsEngineId = "native:audio8"
+        activeTtsEngineLabel = "Audio8 本地语音"
+        selectedVoiceName = null
+        val prefs = getSharedPreferences("yovoice-tts", MODE_PRIVATE)
+        speechRate = prefs.getFloat("speech_rate:native:audio8", speechRate).coerceIn(0.1f, 3.0f)
+        speechPitch = prefs.getFloat("speech_pitch:native:audio8", speechPitch).coerceIn(0.1f, 3.0f)
+        prefs.edit().putString("selected_tts_engine_id", activeTtsEngineId).apply()
+        if (::speedLabel.isInitialized) speedLabel.text = "语速 %.1f×".format(speechRate)
+        if (::pitchLabel.isInitialized) pitchLabel.text = "音调 %.1f×".format(speechPitch)
+        if (::speedSeekBar.isInitialized) speedSeekBar.progress = (speechRate * 10).toInt().coerceIn(1, 30)
+        if (::pitchSeekBar.isInitialized) pitchSeekBar.progress = (speechPitch * 10).toInt().coerceIn(1, 30)
+        if (::enginePicker.isInitialized) enginePicker.text = activeTtsEngineLabel + "   ›"
+        if (::status.isInitialized) status.text = "已选择 Audio8 本地语音；请在页面底部选择并下载模型。"
     }
 
     private fun exportTtsSubtitle() {
@@ -1438,6 +1469,7 @@ class MainActivity : ComponentActivity() {
                 runOnUiThread { if (!destroyed && ::status.isInitialized) status.text = "正在加载本地 Audio8 模型（首次加载可能较久）…" }
                 val loaded = JSONObject(NativeEngine.loadModel(modelFile.absolutePath, model.family, nativeThreads()))
                 check(loaded.optBoolean("ok")) { loaded.optString("error", "模型加载失败") }
+                markNativeModelInUse(model)
 
                 val projectDir = File(filesDir, "projects")
                 if (!projectDir.exists() && !projectDir.mkdirs()) error("无法创建项目目录")
@@ -1750,6 +1782,7 @@ class MainActivity : ComponentActivity() {
                     modelFile.absolutePath, model.family, "asr", "offline", threads = nativeThreads(), auxiliaryPath = alignerFile.absolutePath
                 ))
                 check(loaded.optBoolean("ok")) { loaded.optString("error", "ASR 模型加载失败") }
+                markNativeModelInUse(model)
                 runOnUiThread {
                     if (!destroyed && !isFinishing) asrStatusView?.text = "模型已加载，正在识别音频…"
                 }
@@ -1844,6 +1877,7 @@ class MainActivity : ComponentActivity() {
                 check(modelFile.isFile) { "Audio8 TTS 模型文件不存在，请重新下载" }
                 val loaded = JSONObject(NativeEngine.loadTaskModel(modelFile.absolutePath, model.family, "clon", "offline", threads = nativeThreads()))
                 check(loaded.optBoolean("ok")) { loaded.optString("error", "声音克隆模型加载失败") }
+                markNativeModelInUse(model)
                 runOnUiThread {
                     if (!destroyed && !isFinishing) cloneStatusView?.text = "模型已加载，正在克隆声音并生成语音…"
                 }
@@ -1918,6 +1952,7 @@ class MainActivity : ComponentActivity() {
                 check(modelFile.isFile) { "音乐模型文件不存在，请重新下载" }
                 val loaded = JSONObject(NativeEngine.loadTaskModel(modelFile.absolutePath, model.family, "gen", "offline", threads = nativeThreads()))
                 check(loaded.optBoolean("ok")) { loaded.optString("error", "音乐模型加载失败") }
+                markNativeModelInUse(model)
                 runOnUiThread { if (!destroyed && !isFinishing) musicStatusView?.text = "模型已加载，正在生成音乐…" }
                 val outputDir = File(filesDir, "music")
                 if (!outputDir.exists() && !outputDir.mkdirs()) error("无法创建音乐输出目录")
@@ -1969,6 +2004,7 @@ class MainActivity : ComponentActivity() {
                 check(modelFile.isFile) { "六轨模型文件不存在，请重新下载" }
                 val loaded = JSONObject(NativeEngine.loadTaskModel(modelFile.absolutePath, model.family, "sep", "offline", threads = nativeThreads()))
                 check(loaded.optBoolean("ok")) { loaded.optString("error", "音轨分离模型加载失败") }
+                markNativeModelInUse(model)
                 runOnUiThread { if (!destroyed && !isFinishing) stemStatusView?.text = "模型已加载，正在分离六条音轨…" }
                 val outputDir = File(filesDir, "stems/stems-" + System.currentTimeMillis())
                 val result = JSONObject(NativeEngine.separateStems(pcm, 44_100, 2, outputDir.absolutePath))
@@ -2027,6 +2063,7 @@ class MainActivity : ComponentActivity() {
                 check(modelFile.isFile) { "MuScriptor 模型文件不存在，请重新下载" }
                 val loaded = JSONObject(NativeEngine.loadTaskModel(modelFile.absolutePath, model.family, "midi", "offline", threads = nativeThreads()))
                 check(loaded.optBoolean("ok")) { loaded.optString("error", "MIDI 模型加载失败") }
+                markNativeModelInUse(model)
                 runOnUiThread { if (!destroyed && !isFinishing) midiStatusView?.text = "模型已加载，正在提取音符事件…" }
                 val outputDir = File(filesDir, "midi")
                 if (!outputDir.exists() && !outputDir.mkdirs()) error("无法创建 MIDI 输出目录")
@@ -2229,6 +2266,7 @@ class MainActivity : ComponentActivity() {
                 check(modelFile.isFile) { "Audio8 TTS 模型文件不存在" }
                 val loaded = JSONObject(NativeEngine.loadTaskModel(modelFile.absolutePath, model.family, "clon", "offline", threads = nativeThreads()))
                 check(loaded.optBoolean("ok")) { loaded.optString("error", "故事配音模型加载失败") }
+                markNativeModelInUse(model)
                 val pcmA = if (lines.any { it.speaker == roleAName }) AndroidAudioDecoder.decodeTo16kMono(this, roleAUri!!, 30) else null
                 val pcmB = if (lines.any { it.speaker == roleBName }) AndroidAudioDecoder.decodeTo16kMono(this, roleBUri!!, 30) else null
                 val outputDir = File(filesDir, "story-dubbing/story-" + System.currentTimeMillis())
