@@ -117,8 +117,24 @@ class LineIconView(context: Context, private val kind: String, private val tint:
                 path.moveTo(12f, 3f); path.lineTo(12f, 16f); path.moveTo(6f, 11f); path.lineTo(12f, 17f); path.lineTo(18f, 11f)
                 path.moveTo(4f, 20f); path.lineTo(20f, 20f)
             }
+            "play" -> {
+                path.moveTo(8f, 4f); path.lineTo(19f, 12f); path.lineTo(8f, 20f); path.close()
+            }
+            "pause" -> {
+                path.moveTo(8f, 5f); path.lineTo(8f, 19f); path.moveTo(16f, 5f); path.lineTo(16f, 19f)
+            }
+            "check" -> {
+                path.moveTo(4f, 12f); path.lineTo(9f, 17f); path.lineTo(20f, 6f)
+            }
+            "refresh" -> {
+                canvas.drawArc(4f, 4f, 20f, 20f, 45f, 285f, false, paint)
+                path.moveTo(16f, 3f); path.lineTo(21f, 4f); path.lineTo(20f, 9f)
+            }
+            "close" -> {
+                path.moveTo(5f, 5f); path.lineTo(19f, 19f); path.moveTo(19f, 5f); path.lineTo(5f, 19f)
+            }
         }
-        if (kind != "grid" && kind != "settings") canvas.drawPath(path, paint)
+        if (kind != "grid" && kind != "settings" && kind != "refresh") canvas.drawPath(path, paint)
         canvas.restore()
     }
 }

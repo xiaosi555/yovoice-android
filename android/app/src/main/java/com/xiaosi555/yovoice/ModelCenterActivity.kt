@@ -12,6 +12,7 @@ import androidx.core.view.WindowInsetsCompat
 import android.widget.ArrayAdapter
 import android.widget.Button
 import android.widget.EditText
+import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.Spinner
@@ -276,70 +277,84 @@ class ModelCenterActivity : ComponentActivity() {
         card.addView(status, params())
 
         val downloadable = model.isDownloadable()
-        val action = Button(this).apply {
-            isAllCaps = false
-            setTextColor(if (themeIndex == 1 || themeIndex == 5) 0xFF06191A.toInt() else 0xFFFFFFFF.toInt())
-            backgroundTintList = ColorStateList.valueOf(accentColor)
-            textSize = 12f
-        }
-        card.addView(action, params())
-        if (!downloadable) {
-            status.text = "目录缺少完整 SHA-256 校验信息，暂不可安全下载"
-            action.text = "暂不可下载"
-            action.isEnabled = false
-            action.alpha = 0.55f
-        }
         val uniqueName = "model-download-${model.id}"
         var state: WorkInfo.State? = null
         var installed = false
         var latestInfo: WorkInfo? = null
         var verifiedForSucceeded = false
+        val actionRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL or Gravity.END
+        }
+        val downloadAction = iconActionButton("download", "下载模型")
+        val useAction = iconActionButton("play", "在对应功能中使用")
+        actionRow.addView(downloadAction, LinearLayout.LayoutParams(dp(44), dp(44)))
+        actionRow.addView(useAction, LinearLayout.LayoutParams(dp(44), dp(44)).apply { leftMargin = dp(8) })
+        card.addView(actionRow, params().apply { topMargin = dp(8) })
+
+        fun updateActions() {
+            val downloading = state == WorkInfo.State.RUNNING ||
+                state == WorkInfo.State.ENQUEUED || state == WorkInfo.State.BLOCKED
+            val downloadIcon = when {
+                !downloadable -> "close"
+                downloading -> "pause"
+                installed -> "check"
+                state == WorkInfo.State.FAILED -> "refresh"
+                else -> "download"
+            }
+            val downloadDescription = when {
+                !downloadable -> "缺少校验信息，不能下载"
+                downloading -> "暂停下载"
+                installed -> "模型已下载并校验"
+                state == WorkInfo.State.FAILED -> "重试下载"
+                state == WorkInfo.State.CANCELLED -> "继续下载"
+                else -> "下载模型"
+            }
+            updateIconAction(downloadAction, downloadIcon, downloadDescription, downloadable && !installed)
+            val canUse = installed && runtimeReady && model.family in runtimeFamilies &&
+                ModelFeatureGuide.features.any { model.family in it.modelFamilies }
+            updateIconAction(useAction, "play",
+                if (canUse) "进入对应功能并使用此模型" else "当前模型尚不能在此设备运行",
+                canUse)
+        }
 
         fun update(info: WorkInfo?) {
-            if (!downloadable) {
-                status.text = "目录缺少完整 SHA-256 校验信息，暂不可安全下载"
-                action.text = "暂不可下载"
-                action.isEnabled = false
-                return
-            }
             latestInfo = info
             state = info?.state
-            when (info?.state) {
+            if (!downloadable) {
+                status.text = "目录缺少完整 SHA-256 校验信息，暂不可安全下载"
+            } else when (info?.state) {
                 WorkInfo.State.RUNNING, WorkInfo.State.ENQUEUED, WorkInfo.State.BLOCKED -> {
                     val done = info.progress.getLong("downloaded", 0L)
                     val total = info.progress.getLong("total", model.packageSize())
                     val percent = if (total > 0L) (done * 100 / total).coerceIn(0, 100) else 0
                     status.text = if (info.state == WorkInfo.State.RUNNING) {
                         "下载中：$percent%（${ModelEntry.formatBytes(done)} / ${ModelEntry.formatBytes(total)}）"
-                    } else {
-                        "等待下载任务启动…"
-                    }
-                    action.text = "暂停下载"
+                    } else "等待下载任务启动…"
                 }
                 WorkInfo.State.SUCCEEDED -> {
-                    status.text = if (installed && runtimeReady && model.family in runtimeFamilies) "文件校验通过 · 当前引擎包含此模型家族（尚待设备推理实测）" else if (installed) "文件校验通过 · 当前 Android 引擎未编入此模型家族" else "安装文件缺失，请重新下载"
-                    action.text = if (installed) "已下载" else "重新下载"
+                    status.text = if (installed && runtimeReady && model.family in runtimeFamilies) {
+                        "已下载并通过 SHA-256 校验 · 本机引擎支持此模型家族，仍需实际任务验证"
+                    } else if (installed) {
+                        "已下载并通过校验 · 当前 Android 引擎未编入此模型家族，暂不能本机推理"
+                    } else "安装文件缺失，请重新下载"
                 }
-                WorkInfo.State.CANCELLED -> {
-                    status.text = "下载已暂停；已完成的文件和断点会保留"
-                    action.text = "继续下载"
-                }
-                WorkInfo.State.FAILED -> {
-                    status.text = "下载失败：${info.outputData.getString("error") ?: "可点击重试"}"
-                    action.text = "重试下载"
-                }
-                else -> {
-                    status.text = if (installed && runtimeReady && model.family in runtimeFamilies) "文件校验通过 · 当前引擎包含此模型家族（尚待设备推理实测）" else if (installed) "文件校验通过 · 当前 Android 引擎未编入此模型家族" else "尚未下载"
-                    action.text = if (installed) "已下载" else "下载模型"
-                }
+                WorkInfo.State.CANCELLED -> status.text = "下载已暂停；已完成的文件和断点会保留"
+                WorkInfo.State.FAILED -> status.text = "下载失败：${info.outputData.getString("error") ?: "可点击重试"}"
+                else -> status.text = if (installed && runtimeReady && model.family in runtimeFamilies) {
+                    "已下载并通过 SHA-256 校验 · 本机引擎支持此模型家族，仍需实际任务验证"
+                } else if (installed) {
+                    "已下载并通过校验 · 当前 Android 引擎未编入此模型家族，暂不能本机推理"
+                } else "尚未下载"
             }
+            updateActions()
         }
 
         fun refreshInstalled() {
             modelCheckExecutor.execute {
                 val verified = runCatching { ModelCatalog.isInstalled(this@ModelCenterActivity, model) }.getOrDefault(false)
                 runOnUiThread {
-                    if (!isFinishing) {
+                    if (!isFinishing && !isDestroyed) {
                         installed = verified
                         update(latestInfo)
                     }
@@ -357,24 +372,78 @@ class ModelCenterActivity : ComponentActivity() {
                 verifiedForSucceeded = false
             }
         }
-        refreshInstalled()
-        action.setOnClickListener {
-            if (!downloadable) return@setOnClickListener
+
+        downloadAction.setOnClickListener {
+            if (!downloadable || installed) return@setOnClickListener
             when (state) {
                 WorkInfo.State.RUNNING, WorkInfo.State.ENQUEUED, WorkInfo.State.BLOCKED -> {
                     workManager.cancelUniqueWork(uniqueName)
                     Toast.makeText(this, "已请求暂停，保留下载断点", Toast.LENGTH_SHORT).show()
                 }
-                WorkInfo.State.SUCCEEDED -> {
-                    if (installed) Toast.makeText(this, if (runtimeReady && model.family in runtimeFamilies) "模型文件已校验；该家族已编入引擎，仍需设备实测" else "模型文件已校验，但当前引擎尚未编入该模型家族", Toast.LENGTH_LONG).show()
-                    else enqueue(model, uniqueName)
-                }
-                else -> if (installed) {
-                    Toast.makeText(this, "模型文件已通过校验", Toast.LENGTH_SHORT).show()
-                } else enqueue(model, uniqueName)
+                else -> enqueue(model, uniqueName)
             }
         }
+        useAction.setOnClickListener {
+            if (!installed || !runtimeReady || model.family !in runtimeFamilies) {
+                Toast.makeText(this, "此模型尚未满足本机运行条件", Toast.LENGTH_LONG).show()
+                return@setOnClickListener
+            }
+            val mapped = ModelFeatureGuide.features.filter { model.family in it.modelFamilies }
+            val requested = intent.getStringExtra("focus_feature")
+            val target = mapped.firstOrNull { it.id == requested } ?: mapped.firstOrNull()
+            if (target == null) {
+                Toast.makeText(this, "尚未关联可用的创作功能", Toast.LENGTH_LONG).show()
+                return@setOnClickListener
+            }
+            val prefs = getSharedPreferences("yovoice-model-selection", MODE_PRIVATE).edit()
+            mapped.forEach { prefs.putString(it.id, model.id) }
+            prefs.apply()
+            startActivity(Intent(this, MainActivity::class.java).apply {
+                flags = Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
+                putExtra("open_feature", target.id)
+                putExtra("selected_model_id", model.id)
+            })
+            finish()
+        }
+
+        refreshInstalled()
+        updateActions()
         return card
+    }
+
+    private fun iconActionButton(icon: String, description: String): FrameLayout = FrameLayout(this).apply {
+        background = GradientDrawable().apply {
+            setColor(surface)
+            cornerRadius = dp(14).toFloat()
+            setStroke(dp(1), 0x33808080)
+        }
+        isClickable = true
+        isFocusable = true
+        contentDescription = description
+        addView(LineIconView(this@ModelCenterActivity, icon, accentColor),
+            FrameLayout.LayoutParams(dp(22), dp(22), Gravity.CENTER))
+        setOnTouchListener { view, event ->
+            when (event.actionMasked) {
+                android.view.MotionEvent.ACTION_DOWN -> view.animate().scaleX(0.93f).scaleY(0.93f).setDuration(70L).start()
+                android.view.MotionEvent.ACTION_UP, android.view.MotionEvent.ACTION_CANCEL ->
+                    view.animate().scaleX(1f).scaleY(1f).setDuration(110L).start()
+            }
+            false
+        }
+    }
+
+    private fun updateIconAction(view: FrameLayout, icon: String, description: String, enabled: Boolean) {
+        view.removeAllViews()
+        view.addView(LineIconView(this, icon, if (enabled) accentColor else secondaryText),
+            FrameLayout.LayoutParams(dp(22), dp(22), Gravity.CENTER))
+        view.contentDescription = description
+        view.isEnabled = enabled
+        view.alpha = if (enabled) 1f else 0.42f
+        view.background = GradientDrawable().apply {
+            setColor(surface)
+            cornerRadius = dp(14).toFloat()
+            setStroke(dp(1), if (enabled) 0x55808080 else 0x22808080)
+        }
     }
 
     private fun enqueue(model: ModelEntry, uniqueName: String) {

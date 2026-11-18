@@ -5,6 +5,8 @@ import android.content.Intent
 import android.graphics.Color
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
+import android.graphics.drawable.RippleDrawable
+import android.content.res.ColorStateList
 import android.media.MediaPlayer
 import android.net.Uri
 import android.os.Bundle
@@ -103,8 +105,39 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         themeIndex = getSharedPreferences("yovoice-ui", MODE_PRIVATE).getInt("theme", 0).coerceIn(0, palettes.lastIndex)
+        applyModelLaunchIntent(intent)
         buildShell()
         initializeSystemTts()
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        applyModelLaunchIntent(intent)
+        render()
+    }
+
+    private fun applyModelLaunchIntent(source: Intent?) {
+        val modelId = source?.getStringExtra("selected_model_id") ?: return
+        val model = runCatching { ModelCatalog.load(this).firstOrNull { it.id == modelId } }.getOrNull() ?: return
+        val mapped = ModelFeatureGuide.features.filter { model.family in it.modelFamilies }
+        val requested = source.getStringExtra("open_feature")
+        val target = mapped.firstOrNull { it.id == requested } ?: mapped.firstOrNull() ?: return
+        val prefs = getSharedPreferences("yovoice-model-selection", MODE_PRIVATE).edit()
+        mapped.forEach { prefs.putString(it.id, model.id) }
+        prefs.apply()
+        selectedCreateFeature = target.id
+        activeWorkspaceFeature = null
+        page = 1
+    }
+
+    private fun selectedFeatureModel(featureId: String, fallbackId: String): ModelEntry? {
+        val selectedId = getSharedPreferences("yovoice-model-selection", MODE_PRIVATE)
+            .getString(featureId, fallbackId) ?: fallbackId
+        val feature = ModelFeatureGuide.features.firstOrNull { it.id == featureId }
+        val models = ModelCatalog.load(this)
+        return models.firstOrNull { it.id == selectedId && (feature == null || it.family in feature.modelFamilies) }
+            ?: models.firstOrNull { it.id == fallbackId }
     }
 
     private fun buildShell() {
@@ -132,6 +165,8 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     }
 
     private fun render() {
+        body.animate().cancel()
+        body.alpha = 0f
         body.removeAllViews()
         when (page) {
             0 -> renderStudio()
@@ -142,6 +177,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             else -> renderSettings()
         }
         renderNav()
+        body.animate().alpha(1f).setDuration(180L).start()
     }
 
     private fun renderHeader(title: String, subtitle: String) {
@@ -267,7 +303,8 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                 isClickable = true
                 isFocusable = true
                 contentDescription = "${feature.name}，${feature.shortDescription}"
-                setOnClickListener { selectedCreateFeature = feature.id; render() }
+                background = ripple(p.surface, dp(15), p.border)
+                setOnClickListener { animatePress(this) { selectedCreateFeature = feature.id; render() } }
                 val iconWrap = FrameLayout(this@MainActivity).apply {
                     background = shape(Color.argb(if (p.dark) 38 else 22, Color.red(p.accent), Color.green(p.accent), Color.blue(p.accent)), dp(17))
                     addView(LineIconView(this@MainActivity, featureIcon(feature.id), p.accent), FrameLayout.LayoutParams(dp(30), dp(30), Gravity.CENTER))
@@ -326,7 +363,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             item.addView(label("${model.family} · ${model.precision} · ${model.formattedSize()}", 11, p.secondary).apply { setPadding(0, dp(4), 0, 0) })
             item.addView(label(ModelFeatureGuide.modelPurpose(model.family), 12, p.secondary).apply { setPadding(0, dp(6), 0, 0) })
             item.addView(iconListRow("download", "查看模型", "进入模型库下载，并查看安装与运行支持状态") {
-                try { startActivity(Intent(this, ModelCenterActivity::class.java).putExtra("focus_family", model.family)) }
+                try { startActivity(Intent(this, ModelCenterActivity::class.java).putExtra("focus_family", model.family).putExtra("focus_feature", featureId)) }
                 catch (error: Throwable) { Toast.makeText(this, "模型库打开失败：${error.localizedMessage}", Toast.LENGTH_LONG).show() }
             }, marginTop(5))
             body.addView(item, marginTop(8))
@@ -830,7 +867,8 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         isClickable = true
         isFocusable = true
         contentDescription = title
-        setOnClickListener { action() }
+        background = ripple(p.surface, dp(14), p.border)
+        setOnClickListener { animatePress(this, action) }
         val iconWrap = FrameLayout(this@MainActivity).apply {
             background = shape(Color.argb(if (p.dark) 38 else 22, Color.red(p.accent), Color.green(p.accent), Color.blue(p.accent)), dp(12))
             addView(LineIconView(this@MainActivity, icon, p.accent), FrameLayout.LayoutParams(dp(23), dp(23), Gravity.CENTER))
@@ -866,11 +904,11 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     }
     private fun primaryButton(value: String, action: () -> Unit) = Button(this).apply {
         text = value; isAllCaps = false; textSize = 15f; setTextColor(if (p.dark) 0xFF06191A.toInt() else 0xFFFFFFFF.toInt())
-        background = shape(p.accent, dp(14)); setOnClickListener { action() }
+        background = ripple(p.accent, dp(14)); setOnClickListener { animatePress(this, action) }
     }
     private fun secondaryButton(value: String, action: () -> Unit) = Button(this).apply {
         text = value; isAllCaps = false; textSize = 13f; setTextColor(p.text)
-        background = shape(p.surface, dp(14), p.border, dp(1)); setOnClickListener { action() }
+        background = ripple(p.surface, dp(14), p.border); setOnClickListener { animatePress(this, action) }
     }
     private fun textButton(value: String, size: Int, action: () -> Unit) = TextView(this).apply {
         text = value; textSize = size.toFloat(); gravity = Gravity.CENTER; setTextColor(p.text)
@@ -879,6 +917,15 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     private fun shape(color: Int, radius: Int, stroke: Int = Color.TRANSPARENT, strokeWidth: Int = 0) = GradientDrawable().apply {
         setColor(color); cornerRadius = radius.toFloat()
         if (strokeWidth > 0) setStroke(strokeWidth, stroke)
+    }
+    private fun ripple(color: Int, radius: Int, stroke: Int = Color.TRANSPARENT) =
+        RippleDrawable(ColorStateList.valueOf(if (p.dark) 0x33FFFFFF else 0x22000000),
+            shape(color, radius, stroke, if (stroke == Color.TRANSPARENT) 0 else dp(1)),
+            shape(Color.WHITE, radius))
+    private fun animatePress(view: View, action: () -> Unit) {
+        view.animate().scaleX(0.97f).scaleY(0.97f).setDuration(75L).withEndAction {
+            view.animate().scaleX(1f).scaleY(1f).setDuration(105L).withEndAction(action).start()
+        }.start()
     }
     private fun marginTop(value: Int) = LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(value) }
     private fun dp(value: Int) = (value * resources.displayMetrics.density).toInt()
@@ -893,7 +940,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             Toast.makeText(this, "本地语音引擎正在处理，请稍候", Toast.LENGTH_SHORT).show()
             return
         }
-        val model = ModelCatalog.load(this).firstOrNull { it.id == "audio8-tts-0.6b-q8" }
+        val model = selectedFeatureModel("tts", "audio8-tts-0.6b-q8")
         if (model == null) {
             Toast.makeText(this, "模型目录中没有 Audio8 TTS 条目", Toast.LENGTH_LONG).show()
             page = 2
@@ -1114,7 +1161,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             Toast.makeText(this, "本地推理引擎正在处理，请稍候", Toast.LENGTH_SHORT).show()
             return
         }
-        val model = runCatching { ModelCatalog.load(this).firstOrNull { it.id == "qwen3-asr-0.6b-q8" } }.getOrNull()
+        val model = selectedFeatureModel("asr", "qwen3-asr-0.6b-q8")
         if (model == null) {
             Toast.makeText(this, "模型目录中没有 Qwen3 ASR 0.6B 条目", Toast.LENGTH_LONG).show()
             return
@@ -1223,7 +1270,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             Toast.makeText(this, "本地推理引擎正在处理，请稍候", Toast.LENGTH_SHORT).show()
             return
         }
-        val model = runCatching { ModelCatalog.load(this).firstOrNull { it.id == "audio8-tts-0.6b-q8" } }.getOrNull()
+        val model = selectedFeatureModel("clone", "audio8-tts-0.6b-q8")
         if (model == null) {
             Toast.makeText(this, "模型目录中没有 Audio8 TTS 模型", Toast.LENGTH_LONG).show()
             return
@@ -1303,7 +1350,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             return
         }
         if (nativeBusy) return
-        val model = ModelCatalog.load(this).firstOrNull { it.id == "stable-audio-3-small-music-q8" }
+        val model = selectedFeatureModel("music", "stable-audio-3-small-music-q8")
         if (model == null) {
             Toast.makeText(this, "模型目录中没有 Stable Audio 音乐模型", Toast.LENGTH_LONG).show()
             return
@@ -1350,7 +1397,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             return
         }
         if (nativeBusy) return
-        val model = ModelCatalog.load(this).firstOrNull { it.id == "htdemucs-6stems-q8" }
+        val model = selectedFeatureModel("stems", "htdemucs-6stems-q8")
         if (model == null) {
             Toast.makeText(this, "模型目录中没有 HTDemucs 六轨模型", Toast.LENGTH_LONG).show()
             return
@@ -1408,7 +1455,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             return
         }
         if (nativeBusy) return
-        val model = ModelCatalog.load(this).firstOrNull { it.id == "muscriptor-small-f32" }
+        val model = selectedFeatureModel("midi", "muscriptor-small-f32")
         if (model == null) {
             Toast.makeText(this, "模型目录中没有 MuScriptor 模型", Toast.LENGTH_LONG).show()
             return
@@ -1610,7 +1657,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             return
         }
         if (nativeBusy) return
-        val model = ModelCatalog.load(this).firstOrNull { it.id == "audio8-tts-0.6b-q8" }
+        val model = selectedFeatureModel("story", "audio8-tts-0.6b-q8")
         if (model == null) {
             Toast.makeText(this, "模型目录中没有 Audio8 TTS 模型", Toast.LENGTH_LONG).show()
             return
