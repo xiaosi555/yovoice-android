@@ -16,11 +16,6 @@ import android.widget.Button
 import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.GridLayout
-import android.widget.ImageView
-import android.graphics.Canvas
-import android.graphics.Paint
-import android.graphics.Path
-import android.graphics.drawable.Drawable
 import android.content.ActivityNotFoundException
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
@@ -132,7 +127,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         }
         panel.addView(input, marginTop(14))
         val engine = TextView(this).apply {
-            text = "◖))   手机系统语音引擎   ›"
+            text = "手机系统语音引擎   ›"
             textSize = 14f; setTextColor(p.text); gravity = Gravity.CENTER_VERTICAL
             setPadding(dp(14), 0, dp(14), 0); background = shape(p.bg, dp(13), p.border, dp(1))
         }
@@ -141,8 +136,8 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         panel.addView(secondaryButton("本地语音 · Audio8 TTS") { speakWithLocalModel() }, marginTop(9))
         body.addView(panel, marginTop(18))
         val shortcuts = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; weightSum = 2f }
-        shortcuts.addView(secondaryButton("♬  导入音频") { chooseAudio() }, LinearLayout.LayoutParams(0, dp(64), 1f))
-        shortcuts.addView(secondaryButton("▣  模型中心") { page = 2; render() }, LinearLayout.LayoutParams(0, dp(64), 1f).apply { leftMargin = dp(10) })
+        shortcuts.addView(secondaryButton("导入音频") { chooseAudio() }, LinearLayout.LayoutParams(0, dp(64), 1f))
+        shortcuts.addView(secondaryButton("模型中心") { page = 2; render() }, LinearLayout.LayoutParams(0, dp(64), 1f).apply { leftMargin = dp(10) })
         body.addView(shortcuts, marginTop(12))
         body.addView(label("运行状态", 17, p.text, true), marginTop(24))
         status = label("正在初始化系统 TTS…", 13, p.secondary)
