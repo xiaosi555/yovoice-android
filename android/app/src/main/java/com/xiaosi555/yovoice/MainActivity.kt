@@ -2016,7 +2016,16 @@ class MainActivity : AppCompatActivity() {
             }
         })
         val result = runCatching {
-            engine.synthesizeToFile(text, Bundle(), output, utteranceId)
+            if (android.os.Build.VERSION.SDK_INT >= 30) {
+                engine.synthesizeToFile(text, Bundle(), output, utteranceId)
+            } else {
+                @Suppress("DEPRECATION")
+                engine.synthesizeToFile(
+                    text,
+                    hashMapOf(TextToSpeech.Engine.KEY_PARAM_UTTERANCE_ID to utteranceId),
+                    output.absolutePath
+                )
+            }
         }.getOrDefault(TextToSpeech.ERROR)
         if (result == TextToSpeech.ERROR) {
             output.delete()
