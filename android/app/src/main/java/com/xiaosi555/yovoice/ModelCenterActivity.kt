@@ -626,7 +626,12 @@ class ModelCenterActivity : AppCompatActivity() {
             .setBackoffCriteria( androidx.work.BackoffPolicy.EXPONENTIAL, 30, TimeUnit.SECONDS)
             .build()
         workManager.enqueueUniqueWork(uniqueName, ExistingWorkPolicy.KEEP, request)
-        Toast.makeText(this, "已加入下载队列：${model.name}", Toast.LENGTH_SHORT).show()
+        val sourceLabel = when (source) {
+            "mirror" -> "HF 镜像"
+            "modelscope" -> "ModelScope"
+            else -> "Hugging Face"
+        }
+        Toast.makeText(this, "已选择 $sourceLabel · 已加入下载队列：${model.name}", Toast.LENGTH_SHORT).show()
     }
 
     override fun onDestroy() {

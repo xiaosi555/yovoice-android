@@ -1954,27 +1954,33 @@ class MainActivity : AppCompatActivity() {
         }
         val output = File(projectDir, "system-tts-" + System.currentTimeMillis() + ".wav")
         val utteranceId = "yovoice-system-${System.currentTimeMillis()}"
+        val requestGeneration = ttsGeneration
+        val requestEngineLabel = activeTtsEngineLabel
         engine.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
             override fun onStart(id: String?) {
-                runOnUiThread { if (!destroyed && ::status.isInitialized) status.text = "手机语音引擎正在合成…" }
+                runOnUiThread {
+                    if (!destroyed && requestGeneration == ttsGeneration && ::status.isInitialized) {
+                        status.text = "$requestEngineLabel 正在合成…"
+                    }
+                }
             }
             override fun onDone(id: String?) {
                 runOnUiThread {
-                    if (destroyed || isFinishing) return@runOnUiThread
+                    if (destroyed || isFinishing || requestGeneration != ttsGeneration) return@runOnUiThread
                     if (!output.isFile || output.length() <= 44L) {
                         if (::status.isInitialized) status.text = "手机语音引擎未生成有效音频文件。"
                         return@runOnUiThread
                     }
                     pendingTtsSubtitleSrt = buildWholeAudioSubtitle(text, output)
-                    saveProjectRecord(activeTtsEngineLabel, "TTS", text.take(48), output, "audio/wav")
-                    if (::status.isInitialized) status.text = "语音合成完成 · ${output.length() / 1024} KB · $activeTtsEngineLabel"
+                    saveProjectRecord(requestEngineLabel, "TTS", text.take(48), output, "audio/wav")
+                    if (::status.isInitialized) status.text = "语音合成完成 · ${output.length() / 1024} KB · $requestEngineLabel"
                     playAudio(Uri.fromFile(output))
                 }
             }
             override fun onError(id: String?) {
                 runOnUiThread {
-                    if (!destroyed && !isFinishing && ::status.isInitialized) {
-                        status.text = "手机语音引擎合成失败，请检查音色或切换引擎。"
+                    if (!destroyed && !isFinishing && requestGeneration == ttsGeneration && ::status.isInitialized) {
+                        status.text = "$requestEngineLabel 合成失败，请检查音色或切换引擎。"
                     }
                 }
             }
