@@ -289,8 +289,8 @@ class ModelCenterActivity : ComponentActivity() {
         }
         val downloadAction = iconActionButton("download", "下载模型")
         val useAction = iconActionButton("play", "在对应功能中使用")
-        actionRow.addView(downloadAction, LinearLayout.LayoutParams(dp(44), dp(44)))
-        actionRow.addView(useAction, LinearLayout.LayoutParams(dp(44), dp(44)).apply { leftMargin = dp(8) })
+        actionRow.addView(downloadAction, LinearLayout.LayoutParams(dp(48), dp(48)))
+        actionRow.addView(useAction, LinearLayout.LayoutParams(dp(48), dp(48)).apply { leftMargin = dp(8) })
         card.addView(actionRow, params().apply { topMargin = dp(8) })
 
         fun updateActions() {
