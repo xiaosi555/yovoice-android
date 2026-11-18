@@ -721,6 +721,236 @@ class MainActivity : ComponentActivity() {
         body.addView(label("未完成 Android 引擎适配的功能会明确标注，不会伪装成可用。", 12, p.secondary), marginTop(18))
     }
 
+
+    private fun addFeatureModelSelector(featureId: String, target: LinearLayout) {
+        val feature = ModelFeatureGuide.features.firstOrNull { it.id == featureId } ?: return
+        if (feature.modelFamilies.isEmpty()) return
+        val selectedId = getSharedPreferences("yovoice-model-selection", MODE_PRIVATE).getString(featureId, null)
+        val selected = ModelCatalog.load(this).firstOrNull { it.id == selectedId && it.family in feature.modelFamilies }
+        val row = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(13), dp(8), dp(12), dp(8))
+            background = ripple(p.surface, dp(13), p.border)
+            isClickable = true
+            isFocusable = true
+            minimumHeight = dp(56)
+            contentDescription = "选择或下载" + feature.name + "模型"
+        }
+        val copy = column()
+        copy.addView(label("本地模型", 11, p.secondary, true))
+        copy.addView(label(selected?.name ?: "尚未选择 · 点击推荐模型", 14, p.text, true), marginTop(3))
+        val modelState = label(
+            if (selected == null) "推荐适配模型 · 可在此下载"
+            else if (nativeLoadedModelId == selected.id) "● 正在使用"
+            else selected.family + " · " + selected.formattedSize() + " · 点击更换或下载",
+            11, if (selected != null && nativeLoadedModelId == selected.id) 0xFF238A59.toInt() else p.secondary
+        )
+        copy.addView(modelState, marginTop(2))
+        row.addView(copy, LinearLayout.LayoutParams(0, -2, 1f))
+        row.addView(LineIconView(this, "chevron", p.secondary), LinearLayout.LayoutParams(dp(20), dp(20)))
+        row.setOnClickListener { showModelPicker(featureId) }
+        target.addView(row, marginTop(12))
+        selected?.let { model ->
+            storageExecutor.execute {
+                val installed = runCatching { ModelCatalog.isInstalled(this, model) }.getOrDefault(false)
+                runOnUiThread {
+                    if (!destroyed && modelState.isAttachedToWindow) {
+                        modelState.text = when {
+                            nativeLoadedModelId == model.id -> "● 正在使用 · 已加载到本地引擎"
+                            installed -> model.family + " · 已下载并通过 SHA-256 校验"
+                            else -> model.family + " · 未完整安装或校验失败"
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private fun showModelPicker(featureId: String) {
+        val feature = ModelFeatureGuide.features.firstOrNull { it.id == featureId } ?: return
+        if (feature.modelFamilies.isEmpty()) return
+        val probe = runCatching { JSONObject(NativeEngine.probe()) }.getOrNull()
+        val runtimeReady = probe?.optString("status") == "ready"
+        val familyArray = probe?.optJSONArray("families")
+        val runtimeFamilies = if (familyArray == null) emptySet() else
+            (0 until familyArray.length()).map { familyArray.optString(it) }.toSet()
+        val models = ModelCatalog.load(this)
+            .filter { it.family in feature.modelFamilies }
+            .sortedWith(compareBy<ModelEntry>({ it.family !in runtimeFamilies }, { it.packageSize() }))
+        val content = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(18), dp(8), dp(18), dp(8))
+        }
+        content.addView(label("优先推荐当前 Android 引擎已编入的模型。下载完成还会逐文件校验 SHA-256。", 12, p.secondary))
+        if (!runtimeReady || models.none { it.family in runtimeFamilies }) {
+            content.addView(label("当前设备运行时尚未报告此功能的可用模型家族。下列未适配模型仅供查看，不能作为可运行模型。", 12, 0xFF9A6428.toInt()).apply {
+                setPadding(dp(10), dp(8), dp(10), dp(8))
+                background = shape(0x1AFFB74D, dp(10))
+            }, marginTop(8))
+        }
+        val scroll = ScrollView(this).apply { isFillViewport = false; addView(content, ViewGroup.LayoutParams(-1, -2)) }
+        val dialog = AlertDialog.Builder(this)
+            .setTitle("选择" + feature.name + "模型")
+            .setView(scroll)
+            .setNegativeButton("关闭", null)
+            .setPositiveButton("更多模型") { _, _ ->
+                startActivity(Intent(this, ModelCenterActivity::class.java).putExtra("focus_feature", featureId))
+            }
+            .create()
+        if (models.isEmpty()) content.addView(label("模型目录中暂时没有关联到此功能的模型。", 13, p.secondary), marginTop(12))
+        val manager = WorkManager.getInstance(applicationContext)
+        models.forEach { model ->
+            val supported = runtimeReady && model.family in runtimeFamilies
+            val selectedNow = getSharedPreferences("yovoice-model-selection", MODE_PRIVATE).getString(featureId, null) == model.id
+            val item = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                setPadding(dp(12), dp(10), dp(12), dp(10))
+                background = shape(p.surface, dp(12), p.border, dp(1))
+            }
+            val titleRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+            val titleColumn = column()
+            titleColumn.addView(label(model.name, 14, p.text, true))
+            titleColumn.addView(label(model.family + " · " + model.formattedSize() + " · " + model.precision, 11, p.secondary), marginTop(3))
+            titleRow.addView(titleColumn, LinearLayout.LayoutParams(0, -2, 1f))
+            if (selectedNow) titleRow.addView(label("已选择", 11, p.accent, true))
+            item.addView(titleRow)
+            val state = label(if (supported) "正在检查本地文件…" else "当前 Android 运行时未适配", 11,
+                if (supported) p.secondary else 0xFF9A6428.toInt())
+            item.addView(state, marginTop(6))
+            val action = TextView(this).apply {
+                gravity = Gravity.CENTER
+                textSize = 12f
+                setPadding(dp(14), dp(7), dp(14), dp(7))
+                background = shape(p.bg, dp(9), p.border, dp(1))
+                minHeight = dp(40)
+            }
+            item.addView(action, LinearLayout.LayoutParams(-2, -2).apply { topMargin = dp(8); gravity = Gravity.END })
+            content.addView(item, marginTop(7))
+            val uniqueName = "model-download-" + model.id
+            var installed = false
+            var currentInfo: WorkInfo? = null
+            var verifying = false
+            fun updateAction(info: WorkInfo?) {
+                currentInfo = info
+                val downloading = info?.state in listOf(WorkInfo.State.RUNNING, WorkInfo.State.ENQUEUED, WorkInfo.State.BLOCKED)
+                if (!model.isDownloadable()) {
+                    state.text = "缺少可信文件校验信息，暂不能安全下载"
+                    action.text = "不可下载"
+                    action.isEnabled = false
+                } else if (downloading) {
+                    val done = info?.progress?.getLong("downloaded", 0L) ?: 0L
+                    val total = info?.progress?.getLong("total", model.packageSize()) ?: model.packageSize()
+                    val percent = if (total > 0L) (done * 100L / total).coerceIn(0L, 100L) else 0L
+                    state.text = "下载中 " + percent + "% · " + ModelEntry.formatBytes(done) + " / " + ModelEntry.formatBytes(total)
+                    action.text = "暂停"
+                    action.isEnabled = true
+                } else if (installed) {
+                    state.text = if (supported) "已下载并通过 SHA-256 校验 · 可供此功能选择" else "已下载并校验 · 运行时未适配"
+                    action.text = if (supported) "设为当前模型" else "未适配"
+                    action.isEnabled = supported
+                } else {
+                    state.text = when (info?.state) {
+                        WorkInfo.State.FAILED -> "下载失败：" + (info.outputData.getString("error") ?: "可重试")
+                        WorkInfo.State.CANCELLED -> "下载已暂停，可继续"
+                        else -> if (supported) "尚未下载 · 可直接在此下载" else "运行时未适配 · 仅可在模型库查看"
+                    }
+                    action.text = when (info?.state) {
+                        WorkInfo.State.FAILED, WorkInfo.State.CANCELLED -> "重试下载"
+                        else -> "下载"
+                    }
+                    action.isEnabled = model.isDownloadable()
+                }
+            }
+            action.setOnClickListener {
+                val info = currentInfo
+                if (info?.state in listOf(WorkInfo.State.RUNNING, WorkInfo.State.ENQUEUED, WorkInfo.State.BLOCKED)) {
+                    manager.cancelUniqueWork(uniqueName)
+                } else if (installed) {
+                    if (!supported) return@setOnClickListener
+                    getSharedPreferences("yovoice-model-selection", MODE_PRIVATE).edit().putString(featureId, model.id).apply()
+                    if (featureId == "tts" && model.family == "audio8_tts") {
+                        activeTtsEngineId = "native:audio8"
+                        activeTtsEngineLabel = "Audio8 本地语音"
+                        selectedVoiceName = null
+                        getSharedPreferences("yovoice-tts", MODE_PRIVATE).edit().putString("selected_tts_engine_id", activeTtsEngineId).apply()
+                    }
+                    dialog.dismiss()
+                    render()
+                } else {
+                    val request = OneTimeWorkRequestBuilder<ModelDownloadWorker>()
+                        .setInputData(workDataOf(ModelDownloadWorker.KEY_MODEL_ID to model.id, ModelDownloadWorker.KEY_SOURCE to "huggingface"))
+                        .setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build())
+                        .setBackoffCriteria(androidx.work.BackoffPolicy.EXPONENTIAL, 30, TimeUnit.SECONDS)
+                        .build()
+                    manager.enqueueUniqueWork(uniqueName, ExistingWorkPolicy.KEEP, request)
+                }
+            }
+            manager.getWorkInfosForUniqueWorkLiveData(uniqueName).observe(this) { infos ->
+                val info = infos.firstOrNull()
+                updateAction(info)
+                if (info?.state == WorkInfo.State.SUCCEEDED && !installed && !verifying) {
+                    verifying = true
+                    storageExecutor.execute {
+                        val verified = runCatching { ModelCatalog.isInstalled(this, model) }.getOrDefault(false)
+                        runOnUiThread {
+                            verifying = false
+                            installed = verified
+                            if (!destroyed && !isFinishing) updateAction(info)
+                        }
+                    }
+                }
+            }
+            storageExecutor.execute {
+                val verified = runCatching { ModelCatalog.isInstalled(this, model) }.getOrDefault(false)
+                runOnUiThread {
+                    installed = verified
+                    if (!destroyed && !isFinishing) updateAction(currentInfo)
+                }
+            }
+        }
+        dialog.show()
+    }
+
+    private fun exportTtsSubtitle() {
+        if (pendingTtsSubtitleSrt.isBlank()) {
+            Toast.makeText(this, "请先使用本地语音模型生成音频，再导出带时长的字幕。", Toast.LENGTH_LONG).show()
+            return
+        }
+        val intent = Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
+            addCategory(Intent.CATEGORY_OPENABLE)
+            type = "application/x-subrip"
+            putExtra(Intent.EXTRA_TITLE, "yovoice-tts-subtitle.srt")
+        }
+        startActivityForResult(intent, REQUEST_EXPORT_TTS_SRT)
+    }
+
+    private fun buildWholeAudioSubtitle(text: String, wav: File): String {
+        val header = ByteArray(44)
+        if (!wav.isFile || wav.length() <= 44L) return ""
+        val read = wav.inputStream().use { it.read(header) }
+        if (read < 44 || String(header, 0, 4, Charsets.US_ASCII) != "RIFF") return ""
+        val data = ByteBuffer.wrap(header).order(ByteOrder.LITTLE_ENDIAN)
+        val channels = data.getShort(22).toInt() and 0xffff
+        val sampleRate = data.getInt(24)
+        val bits = data.getShort(34).toInt() and 0xffff
+        val dataBytes = data.getInt(40).toLong() and 0xffffffffL
+        val bytesPerSecond = sampleRate.toLong() * channels * bits / 8L
+        if (bytesPerSecond <= 0L || dataBytes <= 0L) return ""
+        val durationMs = (dataBytes * 1000L / bytesPerSecond).coerceAtLeast(1L)
+        val end = formatSubtitleMillis(durationMs)
+        return "1\n00:00:00,000 --> " + end + "\n" + text.trim() + "\n"
+    }
+
+    private fun formatSubtitleMillis(value: Long): String {
+        val millis = value.coerceAtLeast(0L)
+        val hours = millis / 3_600_000L
+        val minutes = (millis / 60_000L) % 60L
+        val seconds = (millis / 1000L) % 60L
+        val fraction = millis % 1000L
+        return String.format(Locale.US, "%02d:%02d:%02d,%03d", hours, minutes, seconds, fraction)
+    }
+
     private fun renderModels() {
         renderHeader("模型中心", "下载、校验并管理本地模型")
         body.addView(label("模型目录包含上游模型清单。下载完成后还需匹配的 Android 推理后端才能运行。", 13, p.secondary), marginTop(12))
