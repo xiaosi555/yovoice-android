@@ -1123,7 +1123,11 @@ class MainActivity : Activity() {
         tts = try {
             TextToSpeech(applicationContext, { result -> onProviderInit(token, result) }, provider.packageName)
         } catch (error: Throwable) {
-            if (::status.isInitialized) status.text = "启动失败：" + (error.localizedMessage ?: error.javaClass.simpleName)
+            // Constructor failures must leave a visible, recoverable state instead of a dead picker.
+            ttsReady = false
+            val reason = error.localizedMessage ?: error.javaClass.simpleName
+            if (::status.isInitialized) status.text = provider.label + " 启动失败：" + reason
+            if (::enginePicker.isInitialized) enginePicker.text = provider.label + " · 启动失败，点击重试   ›"
             null
         }
     }
@@ -1872,9 +1876,19 @@ class MainActivity : Activity() {
         val currentIndex = voices.indexOfFirst { it.name == selectedVoiceName }.let { if (it >= 0) it else 0 }
         voicePicker.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, names)
         if (voices.isNotEmpty()) {
-            selectedVoiceName = voices[currentIndex].name
-            runCatching { tts?.voice = voices[currentIndex] }
+            val selected = voices[currentIndex]
+            selectedVoiceName = selected.name
+            getSharedPreferences("yovoice-tts", MODE_PRIVATE).edit()
+                .putString("voice:" + activeTtsEngineId, selected.name).apply()
+            val applied = runCatching {
+                tts?.voice = selected
+                tts?.setSpeechRate(speechRate)
+                tts?.setPitch(speechPitch)
+            }.isSuccess
             voicePicker.setSelection(currentIndex)
+            if (!applied && ::status.isInitialized) {
+                status.text = activeTtsEngineLabel + " 已连接，但应用音色或语音参数失败；可尝试其他音色。"
+            }
         }
     }
     private fun releasePlayer() { runCatching { player?.stop() }; runCatching { player?.release() }; player = null }
