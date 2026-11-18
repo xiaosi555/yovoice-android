@@ -16,6 +16,9 @@ import android.widget.Button
 import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.GridLayout
+import android.widget.Spinner
+import android.widget.ArrayAdapter
+import android.widget.SeekBar
 import android.content.ActivityNotFoundException
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
@@ -42,6 +45,12 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     private lateinit var nav: LinearLayout
     private var page = 0
     private var themeIndex = 0
+    private var selectedVoiceName: String? = null
+    private var speechRate = 1.0f
+    private var speechPitch = 1.0f
+    private lateinit var voicePicker: Spinner
+    private lateinit var speedLabel: TextView
+    private lateinit var pitchLabel: TextView
 
     private data class Palette(val name: String, val bg: Int, val surface: Int, val text: Int, val secondary: Int, val accent: Int, val border: Int, val dark: Boolean)
     private val palettes = listOf(
@@ -131,6 +140,50 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             setPadding(dp(14), 0, dp(14), 0); background = shape(p.bg, dp(13), p.border, dp(1))
         }
         panel.addView(engine, LinearLayout.LayoutParams(-1, dp(48)).apply { topMargin = dp(10) })
+
+        panel.addView(label("音色", 13, p.secondary, true), marginTop(12))
+        voicePicker = Spinner(this).apply {
+            adapter = ArrayAdapter(this@MainActivity, android.R.layout.simple_spinner_dropdown_item, listOf("正在读取系统音色…"))
+            onItemSelectedListener = object : android.widget.AdapterView.OnItemSelectedListener {
+                override fun onNothingSelected(parent: android.widget.AdapterView<*>?) {}
+                override fun onItemSelected(parent: android.widget.AdapterView<*>?, view: View?, position: Int, id: Long) {
+                    val voices = tts?.voices.orEmpty().filter { !it.isNetworkConnectionRequired }
+                        .sortedWith(compareBy({ !it.locale.language.equals("zh", true) }, { it.name }))
+                    selectedVoiceName = voices.getOrNull(position)?.name
+                    selectedVoiceName?.let { name -> voices.firstOrNull { it.name == name }?.let { voice -> runCatching { tts?.voice = voice } } }
+                }
+            }
+        }
+        panel.addView(voicePicker, marginTop(4))
+        speedLabel = label("语速 1.0×", 13, p.secondary)
+        panel.addView(speedLabel, marginTop(10))
+        panel.addView(SeekBar(this).apply {
+            max = 30
+            progress = 10
+            setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+                override fun onProgressChanged(seekBar: SeekBar?, value: Int, fromUser: Boolean) {
+                    speechRate = (value.coerceAtLeast(1) / 10f).coerceIn(0.1f, 3f)
+                    speedLabel.text = "语速 %.1f×".format(speechRate)
+                }
+                override fun onStartTrackingTouch(seekBar: SeekBar?) {}
+                override fun onStopTrackingTouch(seekBar: SeekBar?) {}
+            })
+        })
+        pitchLabel = label("音调 1.0×", 13, p.secondary)
+        panel.addView(pitchLabel, marginTop(8))
+        panel.addView(SeekBar(this).apply {
+            max = 30
+            progress = 10
+            setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+                override fun onProgressChanged(seekBar: SeekBar?, value: Int, fromUser: Boolean) {
+                    speechPitch = (value.coerceAtLeast(1) / 10f).coerceIn(0.1f, 3f)
+                    pitchLabel.text = "音调 %.1f×".format(speechPitch)
+                }
+                override fun onStartTrackingTouch(seekBar: SeekBar?) {}
+                override fun onStopTrackingTouch(seekBar: SeekBar?) {}
+            })
+        })
+
         panel.addView(primaryButton("试听朗读（手机 TTS）") { speak() }, marginTop(10))
         panel.addView(secondaryButton("本地语音 · Audio8 TTS") { speakWithLocalModel() }, marginTop(9))
         body.addView(panel, marginTop(18))
@@ -365,6 +418,8 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                 showTtsOptions(); return
             }
         }
+        runCatching { engine.setSpeechRate(speechRate); engine.setPitch(speechPitch) }
+        selectedVoiceName?.let { name -> engine.voices?.firstOrNull { it.name == name }?.let { voice -> runCatching { engine.voice = voice } } }
         val result = runCatching { engine.speak(text, TextToSpeech.QUEUE_FLUSH, null, "yovoice-preview") }.getOrDefault(TextToSpeech.ERROR)
         if (result == TextToSpeech.ERROR) Toast.makeText(this, "朗读请求失败，请切换系统 TTS 引擎。", Toast.LENGTH_LONG).show()
     }
@@ -401,6 +456,23 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                 else -> "系统 TTS 已就绪，可以试听。"
             }
             if (::status.isInitialized) status.text = message
+            if (ttsReady && ::voicePicker.isInitialized) refreshSystemVoices()
+        }
+    }
+    private fun refreshSystemVoices() {
+        val voices = runCatching { tts?.voices.orEmpty().filter { !it.isNetworkConnectionRequired }
+            .sortedWith(compareBy({ !it.locale.language.equals("zh", true) }, { it.name })) }.getOrDefault(emptyList())
+        val names = voices.map { voice ->
+            val language = voice.locale.getDisplayLanguage(Locale.SIMPLIFIED_CHINESE)
+            val country = voice.locale.getDisplayCountry(Locale.SIMPLIFIED_CHINESE)
+            val quality = if (voice.quality >= android.speech.tts.Voice.QUALITY_HIGH) "高品质" else "标准"
+            "${voice.name} · $language $country · $quality"
+        }.ifEmpty { listOf("当前引擎未提供可选音色") }
+        val currentIndex = voices.indexOfFirst { it.name == selectedVoiceName }.coerceAtLeast(0)
+        voicePicker.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, names)
+        if (voices.isNotEmpty()) {
+            selectedVoiceName = voices[currentIndex].name
+            voicePicker.setSelection(currentIndex)
         }
     }
     private fun releasePlayer() { runCatching { player?.stop() }; runCatching { player?.release() }; player = null }
