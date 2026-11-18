@@ -130,6 +130,11 @@ class LineIconView(context: Context, private val kind: String, private val tint:
                 canvas.drawArc(4f, 4f, 20f, 20f, 45f, 285f, false, paint)
                 path.moveTo(16f, 3f); path.lineTo(21f, 4f); path.lineTo(20f, 9f)
             }
+            "info" -> {
+                canvas.drawCircle(12f, 12f, 9f, paint)
+                path.moveTo(12f, 10.5f); path.lineTo(12f, 17f)
+                canvas.drawCircle(12f, 7f, 0.7f, paint)
+            }
             "close" -> {
                 path.moveTo(5f, 5f); path.lineTo(19f, 19f); path.moveTo(19f, 5f); path.lineTo(5f, 19f)
             }

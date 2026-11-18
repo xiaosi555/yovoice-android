@@ -259,8 +259,23 @@ class MainActivity : ComponentActivity() {
         val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
         val brand = column()
         brand.addView(label(title, 27, p.text, true))
-        brand.addView(label(subtitle, 13, p.secondary).apply { setPadding(0, dp(4), 0, 0) })
         row.addView(brand, LinearLayout.LayoutParams(0, -2, 1f))
+        val help = FrameLayout(this).apply {
+            contentDescription = "查看标题说明"
+            isClickable = true
+            isFocusable = true
+            background = ripple(p.surface, dp(12))
+            addView(LineIconView(this@MainActivity, "info", p.secondary),
+                FrameLayout.LayoutParams(dp(20), dp(20), Gravity.CENTER))
+            setOnClickListener {
+                AlertDialog.Builder(this@MainActivity)
+                    .setTitle(title)
+                    .setMessage(subtitle)
+                    .setPositiveButton("知道了", null)
+                    .show()
+            }
+        }
+        row.addView(help, LinearLayout.LayoutParams(dp(44), dp(48)))
         val settings = LineIconView(this, "settings", p.secondary).apply {
             contentDescription = "设置"
             isClickable = true
@@ -1115,7 +1130,7 @@ class MainActivity : ComponentActivity() {
         renderHeader("我的", "外观、语音与设备设置")
         body.addView(label("外观模式", 17, p.text, true), marginTop(22))
         val modeRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-        listOf("system" to "跟随系统", "light" to "亮色", "dark" to "暗色").forEach { (mode, title) ->
+        listOf("system" to "跟随系统", "light" to "白天", "dark" to "夜间").forEach { (mode, title) ->
             val chip = TextView(this).apply {
                 text = (if (appearanceMode == mode) "✓ " else "") + title
                 gravity = Gravity.CENTER
@@ -1438,15 +1453,56 @@ class MainActivity : ComponentActivity() {
         background = shape(p.surface, dp(20), p.border, dp(1))
     }
     private fun column() = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-    private fun section(title: String, sub: String) = column().apply { addView(label(title, 18, p.text, true)); addView(label(sub, 12, p.secondary).apply { setPadding(0, dp(4), 0, 0) }) }
+    private fun section(title: String, sub: String) = LinearLayout(this).apply {
+        orientation = LinearLayout.HORIZONTAL
+        gravity = Gravity.CENTER_VERTICAL
+        addView(label(title, 18, p.text, true), LinearLayout.LayoutParams(0, -2, 1f))
+        val help = FrameLayout(this@MainActivity).apply {
+            contentDescription = "查看功能说明"
+            isClickable = true
+            isFocusable = true
+            background = ripple(p.surface, dp(10))
+            addView(LineIconView(this@MainActivity, "info", p.secondary),
+                FrameLayout.LayoutParams(dp(18), dp(18), Gravity.CENTER))
+            setOnClickListener {
+                AlertDialog.Builder(this@MainActivity)
+                    .setTitle(title)
+                    .setMessage(sub)
+                    .setPositiveButton("知道了", null)
+                    .show()
+            }
+        }
+        addView(help, LinearLayout.LayoutParams(dp(40), dp(40)))
+    }
     private fun infoRow(title: String, detail: String) = TextView(this).apply {
         text = "$title\n$detail"; textSize = 14f; setTextColor(p.text); setLineSpacing(dp(3).toFloat(), 1f)
         setPadding(dp(14), dp(13), dp(14), dp(13)); background = shape(p.surface, dp(14), p.border, dp(1))
     }
     private fun toolRow(title: String, detail: String, action: () -> Unit) = LinearLayout(this).apply {
-        orientation = LinearLayout.VERTICAL; setPadding(dp(16), dp(16), dp(16), dp(16))
-        background = shape(p.surface, dp(16), p.border, dp(1)); setOnClickListener { action() }
-        addView(label(title, 16, p.text, true)); addView(label(detail, 12, p.secondary).apply { setPadding(0, dp(5), 0, 0) })
+        orientation = LinearLayout.HORIZONTAL
+        gravity = Gravity.CENTER_VERTICAL
+        setPadding(dp(16), dp(10), dp(10), dp(10))
+        background = ripple(p.surface, dp(16), p.border)
+        isClickable = true
+        isFocusable = true
+        setOnClickListener { action() }
+        addView(label(title, 16, p.text, true), LinearLayout.LayoutParams(0, -2, 1f))
+        val help = FrameLayout(this@MainActivity).apply {
+            contentDescription = "查看功能说明"
+            isClickable = true
+            isFocusable = true
+            background = ripple(p.surface, dp(10))
+            addView(LineIconView(this@MainActivity, "info", p.secondary),
+                FrameLayout.LayoutParams(dp(18), dp(18), Gravity.CENTER))
+            setOnClickListener {
+                AlertDialog.Builder(this@MainActivity)
+                    .setTitle(title)
+                    .setMessage(detail)
+                    .setPositiveButton("知道了", null)
+                    .show()
+            }
+        }
+        addView(help, LinearLayout.LayoutParams(dp(44), dp(44)))
     }
     private fun label(value: String, size: Int, color: Int, bold: Boolean = false) = TextView(this).apply {
         text = value; textSize = size.toFloat(); setTextColor(color)
