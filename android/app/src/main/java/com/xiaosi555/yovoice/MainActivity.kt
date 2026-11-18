@@ -60,6 +60,16 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     private var cloneReferenceUri: Uri? = null
     private var cloneStatusView: TextView? = null
     private var pendingCloneExport: File? = null
+    private lateinit var musicPromptInput: EditText
+    private lateinit var musicDurationInput: EditText
+    private var musicStatusView: TextView? = null
+    private var pendingMusicExport: File? = null
+    private var stemStatusView: TextView? = null
+    private var stemResultsContainer: LinearLayout? = null
+    private var midiStatusView: TextView? = null
+    private lateinit var midiInstrumentInput: EditText
+    private var pendingMidiExport: File? = null
+    private var pendingGenericExport: File? = null
 
     private data class Palette(val name: String, val bg: Int, val surface: Int, val text: Int, val secondary: Int, val accent: Int, val border: Int, val dark: Boolean)
     private val palettes = listOf(
@@ -256,7 +266,60 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         }
         body.addView(asrResultView, marginTop(8))
         body.addView(secondaryButton("导出识别文本 TXT") { exportTranscript() }, marginTop(8))
-        body.addView(toolRow("音轨分离 / 音乐 / MIDI", "桌面版模块纳入移植清单，尚未完成 Android 后端") { showFeaturePending("音轨分离 / 音乐 / MIDI") }, marginTop(10))
+        val musicPanel = card()
+        musicPanel.addView(section("AI 音乐生成", "Stable Audio 3 Small · 根据文字描述生成音乐"))
+        musicPromptInput = EditText(this).apply {
+            hint = "例如：温暖的钢琴与弦乐，电影感、缓慢渐强、纯音乐"
+            minLines = 3
+            gravity = Gravity.TOP
+            textSize = 15f
+            setTextColor(p.text); setHintTextColor(p.secondary)
+            background = shape(p.bg, dp(12), p.border, dp(1))
+            setPadding(dp(12), dp(12), dp(12), dp(12))
+        }
+        musicPanel.addView(musicPromptInput, marginTop(12))
+        musicDurationInput = EditText(this).apply {
+            hint = "生成时长（秒）"
+            setText("20")
+            inputType = android.text.InputType.TYPE_CLASS_NUMBER or android.text.InputType.TYPE_NUMBER_FLAG_DECIMAL
+            textSize = 14f
+            setTextColor(p.text); setHintTextColor(p.secondary)
+            background = shape(p.bg, dp(12), p.border, dp(1))
+            setPadding(dp(12), dp(10), dp(12), dp(10))
+        }
+        musicPanel.addView(musicDurationInput, marginTop(8))
+        musicStatusView = label("模型约 1.68 GB，首次使用需先下载。", 12, p.secondary)
+        musicPanel.addView(musicStatusView, marginTop(8))
+        musicPanel.addView(primaryButton("生成音乐") { generateMusic() }, marginTop(10))
+        musicPanel.addView(secondaryButton("导出生成音乐 WAV") { exportMusic() }, marginTop(8))
+        body.addView(musicPanel, marginTop(10))
+
+        val stemPanel = card()
+        stemPanel.addView(section("六轨音轨分离", "HTDemucs · 人声、鼓、贝斯、其他、吉他、钢琴"))
+        stemPanel.addView(secondaryButton("选择音乐文件") { chooseStemAudio() }, marginTop(10))
+        stemStatusView = label("选择 44.1 kHz 音乐文件后开始分离。", 12, p.secondary)
+        stemPanel.addView(stemStatusView, marginTop(8))
+        stemResultsContainer = column()
+        stemPanel.addView(stemResultsContainer, marginTop(8))
+        stemPanel.addView(primaryButton("开始六轨分离") { separateAudio() }, marginTop(10))
+        body.addView(stemPanel, marginTop(10))
+
+        val midiPanel = card()
+        midiPanel.addView(section("音频转 MIDI", "MuScriptor Small · 从音乐中提取音符与乐器事件"))
+        midiPanel.addView(secondaryButton("选择待转换音乐") { chooseMidiAudio() }, marginTop(10))
+        midiInstrumentInput = EditText(this).apply {
+            hint = "可选乐器限制，例如 drums,electric_bass"
+            textSize = 14f
+            setTextColor(p.text); setHintTextColor(p.secondary)
+            background = shape(p.bg, dp(12), p.border, dp(1))
+            setPadding(dp(12), dp(10), dp(12), dp(10))
+        }
+        midiPanel.addView(midiInstrumentInput, marginTop(8))
+        midiStatusView = label("模型约 412 MB，支持导出标准 MIDI 文件。", 12, p.secondary)
+        midiPanel.addView(midiStatusView, marginTop(8))
+        midiPanel.addView(primaryButton("开始转换 MIDI") { convertToMidi() }, marginTop(10))
+        midiPanel.addView(secondaryButton("导出 MIDI 文件") { exportMidi() }, marginTop(8))
+        body.addView(midiPanel, marginTop(10))
         body.addView(label("未完成 Android 引擎适配的功能会明确标注，不会伪装成可用。", 12, p.secondary), marginTop(18))
     }
 
