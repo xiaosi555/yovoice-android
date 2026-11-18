@@ -58,6 +58,9 @@ object AndroidAudioDecoder {
             var outputEncoding = AudioFormat.ENCODING_PCM_16BIT
             val info = MediaCodec.BufferInfo()
             val collector = ResampledPcmCollector(outputRate, targetSampleRate, targetChannels, maxOutputSamples)
+            // Reuse frame buffers: allocating arrays for every PCM frame causes heavy GC on long recordings.
+            val sourceFrame = FloatArray(8)
+            val mappedFrame = FloatArray(targetChannels)
             var idleLoops = 0
 
             while (!outputEnded) {
@@ -79,7 +82,7 @@ object AndroidAudioDecoder {
                 when (val outputIndex = decoder.dequeueOutputBuffer(info, 10_000)) {
                     MediaCodec.INFO_TRY_AGAIN_LATER -> {
                         idleLoops++
-                        if (inputEnded && idleLoops > 100) error("音频解码超时")
+                        if (inputEnded && idleLoops > 500) error("音频解码超时")
                     }
                     MediaCodec.INFO_OUTPUT_FORMAT_CHANGED -> {
                         val format = decoder.outputFormat
@@ -107,7 +110,6 @@ object AndroidAudioDecoder {
                             require(outputChannels in 1..8) { "音频声道数异常：$outputChannels" }
                             val frames = pcm.remaining() / (bytesPerSample * outputChannels)
                             for (frame in 0 until frames) {
-                                val sourceFrame = FloatArray(outputChannels)
                                 for (channel in 0 until outputChannels) {
                                     sourceFrame[channel] = when (outputEncoding) {
                                         AudioFormat.ENCODING_PCM_FLOAT -> pcm.float.coerceIn(-1f, 1f)
@@ -115,13 +117,18 @@ object AndroidAudioDecoder {
                                         else -> ((pcm.get().toInt() and 0xff) - 128) / 128f
                                     }
                                 }
-                                val mapped = when (targetChannels) {
-                                    1 -> floatArrayOf(sourceFrame.average().toFloat())
-                                    else -> if (outputChannels == 1) {
-                                        floatArrayOf(sourceFrame[0], sourceFrame[0])
-                                    } else floatArrayOf(sourceFrame[0], sourceFrame[1])
+                                if (targetChannels == 1) {
+                                    var sum = 0f
+                                    for (channel in 0 until outputChannels) sum += sourceFrame[channel]
+                                    mappedFrame[0] = sum / outputChannels
+                                } else if (outputChannels == 1) {
+                                    mappedFrame[0] = sourceFrame[0]
+                                    mappedFrame[1] = sourceFrame[0]
+                                } else {
+                                    mappedFrame[0] = sourceFrame[0]
+                                    mappedFrame[1] = sourceFrame[1]
                                 }
-                                collector.add(mapped)
+                                collector.add(mappedFrame)
                             }
                         }
                         if ((info.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0) outputEnded = true
@@ -148,7 +155,8 @@ object AndroidAudioDecoder {
         private var ratio = initialRate.coerceAtLeast(1).toDouble() / targetRate
         private var nextOutputAt = 0.0
         private var sourceIndex = 0L
-        private var previous: FloatArray? = null
+        private val previous = FloatArray(targetChannels)
+        private var hasPrevious = false
         private var values = FloatArray((targetRate * targetChannels).coerceAtMost(maxOutputSamples))
         private var count = 0
 
@@ -159,34 +167,43 @@ object AndroidAudioDecoder {
 
         fun add(frame: FloatArray) {
             require(frame.size == targetChannels) { "PCM 声道布局错误" }
-            val prev = previous
-            if (prev == null) {
+            if (!hasPrevious) {
                 append(frame)
-                previous = frame.copyOf()
+                for (channel in 0 until targetChannels) previous[channel] = frame[channel]
+                hasPrevious = true
                 sourceIndex = 0
                 nextOutputAt = ratio
                 return
             }
             while (nextOutputAt <= sourceIndex.toDouble()) {
                 val fraction = (nextOutputAt - (sourceIndex - 1).toDouble()).coerceIn(0.0, 1.0).toFloat()
-                val interpolated = FloatArray(targetChannels) { channel ->
-                    (prev[channel] + (frame[channel] - prev[channel]) * fraction).coerceIn(-1f, 1f)
-                }
-                append(interpolated)
+                appendInterpolated(previous, frame, fraction)
                 nextOutputAt += ratio
             }
-            previous = frame.copyOf()
+            for (channel in 0 until targetChannels) previous[channel] = frame[channel]
             sourceIndex++
         }
 
-        private fun append(frame: FloatArray) {
+        private fun ensureCapacity() {
             require(count + targetChannels <= maxOutputSamples) { "解码后的音频超过时长限制" }
             val required = count + targetChannels
             if (required > values.size) {
                 val nextSize = (values.size * 2).coerceAtLeast(required).coerceAtMost(maxOutputSamples)
                 values = values.copyOf(nextSize)
             }
-            frame.forEach { values[count++] = it }
+        }
+
+        private fun append(frame: FloatArray) {
+            ensureCapacity()
+            for (channel in 0 until targetChannels) values[count++] = frame[channel]
+        }
+
+        private fun appendInterpolated(previousFrame: FloatArray, currentFrame: FloatArray, fraction: Float) {
+            ensureCapacity()
+            for (channel in 0 until targetChannels) {
+                values[count++] = (previousFrame[channel] +
+                    (currentFrame[channel] - previousFrame[channel]) * fraction).coerceIn(-1f, 1f)
+            }
         }
 
         fun toArray(): FloatArray = values.copyOf(count)
