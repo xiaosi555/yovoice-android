@@ -40,6 +40,11 @@ data class ModelEntry(
 
     fun packageSize(): Long = packageFiles().sumOf { it.size }
 
+    /** Only allow downloads when every asset has a trusted SHA-256 and a valid size. */
+    fun isDownloadable(): Boolean = packageFiles().isNotEmpty() && packageFiles().all {
+        it.size > 0L && it.sha256.matches(Regex("[a-fA-F0-9]{64}"))
+    }
+
     fun fileUrl(file: ModelAssetFile, source: String, catalogRevision: String): String {
         val selectedRepo = file.repo ?: repo
         val selectedRevision = file.revision ?: revision ?: catalogRevision
@@ -119,7 +124,7 @@ object ModelCatalog {
                     precision = item.getString("precision"),
                     remotePath = item.getString("remotePath"),
                     size = item.getLong("size"),
-                    sha256 = item.getString("sha256"),
+                    sha256 = item.optString("sha256", ""),
                     repo = item.optString("repo").takeIf { it.isNotBlank() },
                     modelScope = item.optString("modelScope").takeIf { it.isNotBlank() },
                     revision = item.optString("revision").takeIf { it.isNotBlank() },
