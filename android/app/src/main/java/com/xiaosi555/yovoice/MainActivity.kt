@@ -15,6 +15,17 @@ import android.view.ViewGroup
 import android.widget.Button
 import android.widget.EditText
 import android.widget.LinearLayout
+import android.widget.GridLayout
+import android.widget.ImageView
+import android.graphics.Canvas
+import android.graphics.Paint
+import android.graphics.Path
+import android.graphics.drawable.Drawable
+import android.content.ActivityNotFoundException
+import android.speech.tts.TextToSpeech
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
 import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
@@ -53,15 +64,19 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         super.onCreate(savedInstanceState)
         themeIndex = getSharedPreferences("yovoice-ui", MODE_PRIVATE).getInt("theme", 0).coerceIn(0, palettes.lastIndex)
         buildShell()
-        tts = try { TextToSpeech(applicationContext, this) } catch (e: Exception) { null }
+        initializeSystemTts()
     }
 
     private fun buildShell() {
         window.statusBarColor = p.bg
         window.navigationBarColor = p.bg
-        @Suppress("DEPRECATION")
-        window.decorView.systemUiVisibility = if (p.dark) 0 else (View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR or View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR)
+        WindowCompat.setDecorFitsSystemWindows(window, false)
         val root = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setBackgroundColor(p.bg) }
+        ViewCompat.setOnApplyWindowInsetsListener(root) { view, insets ->
+            val bars = insets.getInsets(WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout())
+            view.setPadding(bars.left, bars.top, bars.right, bars.bottom)
+            insets
+        }
         val scroll = ScrollView(this).apply { isFillViewport = true; overScrollMode = View.OVER_SCROLL_NEVER }
         body = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(20), dp(18), dp(20), dp(24)) }
         scroll.addView(body, ViewGroup.LayoutParams(-1, -2))
@@ -94,7 +109,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         brand.addView(label(title, 29, p.text, true).apply { setPadding(0, dp(12), 0, 0) })
         brand.addView(label(subtitle, 13, p.secondary).apply { setPadding(0, dp(4), 0, 0) })
         row.addView(brand, LinearLayout.LayoutParams(0, -2, 1f))
-        val settings = textButton("⚙", 22) { page = 3; render() }
+        val settings = textButton("设置", 14) { page = 3; render() }
         row.addView(settings, LinearLayout.LayoutParams(dp(48), dp(48)))
         body.addView(row)
     }
@@ -123,10 +138,10 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             setPadding(dp(14), 0, dp(14), 0); background = shape(p.bg, dp(13), p.border, dp(1))
         }
         panel.addView(engine, LinearLayout.LayoutParams(-1, dp(48)).apply { topMargin = dp(10) })
-        panel.addView(primaryButton("〽  试听朗读（系统语音）") { speak() }, marginTop(10))
-        panel.addView(secondaryButton("本地 AI 语音 · Audio8 TTS") { speakWithLocalModel() }, marginTop(9))
+        panel.addView(primaryButton("试听朗读（手机 TTS）") { speak() }, marginTop(10))
+        panel.addView(secondaryButton("本地语音 · Audio8 TTS") { speakWithLocalModel() }, marginTop(9))
         body.addView(panel, marginTop(18))
-        val shortcuts = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        val shortcuts = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; weightSum = 2f }
         shortcuts.addView(secondaryButton("♬  导入音频") { chooseAudio() }, LinearLayout.LayoutParams(0, dp(64), 1f))
         shortcuts.addView(secondaryButton("▣  模型中心") { page = 2; render() }, LinearLayout.LayoutParams(0, dp(64), 1f).apply { leftMargin = dp(10) })
         body.addView(shortcuts, marginTop(12))
@@ -134,23 +149,28 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         status = label("正在初始化系统 TTS…", 13, p.secondary)
         body.addView(status, marginTop(8))
         body.addView(label("最近项目", 17, p.text, true), marginTop(24))
-        body.addView(infoRow("中文旁白试听", "系统语音 · 可直接试听"))
-        body.addView(infoRow("本地音频导入", "支持通过文件选择器载入音频"))
+        body.addView(infoRow("中文旁白试听", "手机系统语音引擎"), marginTop(8))
+        body.addView(infoRow("本地音频导入", "支持通过文件选择器载入音频"), marginTop(8))
     }
 
     private fun renderCreate() {
         renderHeader("创作工具", "从文字、音频开始你的创作")
-        body.addView(toolRow("文字转语音", "输入文字，使用手机系统 TTS 试听") { page = 0; render() }, marginTop(18))
+        body.addView(toolRow("文字转语音", "选择手机系统 TTS 或本地 Audio8 引擎") { page = 0; render() }, marginTop(18))
         body.addView(toolRow("导入本地音频", "选择手机中的音频文件并播放") { chooseAudio() }, marginTop(10))
         body.addView(toolRow("模型与音色", "下载模型、查看本地安装状态") { page = 2; render() }, marginTop(10))
-        body.addView(label("其他创作模块将在对应 Android 推理后端验证后逐步开放。", 12, p.secondary), marginTop(18))
+        body.addView(toolRow("声音克隆", "需要接入对应的 Android 声音克隆推理后端") { showFeaturePending("声音克隆") }, marginTop(10))
+        body.addView(toolRow("字幕识别 / 转录", "导入音视频并生成字幕的 Android 后端待适配") { showFeaturePending("字幕识别 / 转录") }, marginTop(10))
+        body.addView(toolRow("音轨分离 / 音乐 / MIDI", "桌面版模块纳入移植清单，尚未完成 Android 后端") { showFeaturePending("音轨分离 / 音乐 / MIDI") }, marginTop(10))
+        body.addView(label("未完成 Android 引擎适配的功能会明确标注，不会伪装成可用。", 12, p.secondary), marginTop(18))
     }
 
     private fun renderModels() {
         renderHeader("模型中心", "下载、校验并管理本地模型")
         body.addView(label("模型目录包含上游模型清单。下载完成后还需匹配的 Android 推理后端才能运行。", 13, p.secondary), marginTop(12))
         body.addView(toolRow("打开模型管理", "查看 68 个模型条目、下载源与下载进度") {
-            startActivity(Intent(this, ModelCenterActivity::class.java))
+            try { startActivity(Intent(this, ModelCenterActivity::class.java)) } catch (error: Throwable) {
+                Toast.makeText(this, "模型中心打开失败：${error.localizedMessage ?: error.javaClass.simpleName}", Toast.LENGTH_LONG).show()
+            }
         }, marginTop(18))
         body.addView(label("建议先从轻量模型开始。大型模型下载前请确认存储空间；实际推理能力取决于模型家族适配和设备资源。", 12, p.secondary), marginTop(14))
     }
@@ -158,6 +178,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     private fun renderSettings() {
         renderHeader("设置", "外观与设备语音服务")
         body.addView(label("界面主题", 17, p.text, true), marginTop(22))
+        val themeGrid = GridLayout(this).apply { columnCount = 2; useDefaultMargins = false }
         palettes.forEachIndexed { index, palette ->
             val item = TextView(this).apply {
                 text = (if (themeIndex == index) "✓  " else "") + palette.name
@@ -170,17 +191,19 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                     render()
                 }
             }
-            body.addView(item, marginTop(9))
+            themeGrid.addView(item, GridLayout.LayoutParams(GridLayout.spec(index / 2, 1f), GridLayout.spec(index % 2, 1f)).apply { width = 0; height = dp(54); setMargins(dp(4), dp(5), dp(4), dp(5)) })
         }
+        body.addView(themeGrid, marginTop(10))
         body.addView(label("语音引擎", 17, p.text, true), marginTop(24))
-        body.addView(infoRow("手机系统 TTS", if (ttsReady) "已就绪" else "正在检测"))
-        body.addView(infoRow("Android 原生 AI 引擎", "ARM64 编译验证已通过，正在接入应用"))
+        body.addView(infoRow("手机系统 TTS", if (ttsReady) "已就绪" else "未就绪或正在检测"), marginTop(8))
+        body.addView(secondaryButton("选择语音引擎 / 打开系统语音设置") { showTtsOptions() }, marginTop(8))
+        body.addView(infoRow("Android 本地推理引擎", "Audio8 TTS 首个适配目标"), marginTop(8))
         body.addView(label("主题名称与颜色沿用 Yovoice 桌面版主题体系；移动端针对单手操作重新排布。", 12, p.secondary), marginTop(18))
     }
 
     private fun renderNav() {
         nav.removeAllViews()
-        listOf("⌂" to "工作室", "♫" to "创作", "◇" to "模型", "⚙" to "设置").forEachIndexed { index, pair ->
+        listOf("⌂" to "工作室", "♫" to "创作", "▦" to "模型", "⚙" to "设置").forEachIndexed { index, pair ->
             val item = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER; setOnClickListener { page = index; render() } }
             item.addView(label(pair.first, 20, if (page == index) p.accent else p.secondary, true).apply { gravity = Gravity.CENTER })
             item.addView(label(pair.second, 11, if (page == index) p.accent else p.secondary, page == index).apply { gravity = Gravity.CENTER; setPadding(0, dp(2), 0, 0) })
@@ -289,13 +312,68 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         }
     }
 
+    private fun initializeSystemTts() {
+        ttsReady = false
+        tts = try {
+            TextToSpeech(applicationContext) { result -> onInit(result) }
+        } catch (error: Throwable) {
+            if (::status.isInitialized) status.text = "无法创建系统 TTS：${error.localizedMessage ?: error.javaClass.simpleName}"
+            null
+        }
+    }
+
+    private fun showTtsOptions() {
+        val engines = runCatching { tts?.engines.orEmpty() }.getOrDefault(emptyList())
+        val labels = engines.map { it.label?.toString()?.takeIf(String::isNotBlank) ?: it.name }
+        val choices = labels + listOf("打开手机文字转语音设置", "安装语音数据")
+        android.app.AlertDialog.Builder(this).setTitle("语音引擎")
+            .setItems(choices.toTypedArray()) { _, which ->
+                when {
+                    which < engines.size -> {
+                        val selected = engines[which]
+                        runCatching { tts?.shutdown() }
+                        ttsReady = false
+                        tts = try { TextToSpeech(applicationContext, this, selected.name) } catch (e: Throwable) { null }
+                        if (tts == null) Toast.makeText(this, "无法启动所选语音引擎", Toast.LENGTH_LONG).show()
+                    }
+                    which == engines.size -> launchTtsSettings()
+                    else -> try { startActivity(Intent(TextToSpeech.Engine.ACTION_INSTALL_TTS_DATA)) } catch (_: ActivityNotFoundException) { launchTtsSettings() }
+                }
+            }.setNegativeButton("取消", null).show()
+    }
+
+    private fun launchTtsSettings() {
+        val intent = Intent("com.android.settings.TTS_SETTINGS")
+        try { startActivity(intent) } catch (_: ActivityNotFoundException) {
+            Toast.makeText(this, "请在系统设置中搜索“文字转语音输出”", Toast.LENGTH_LONG).show()
+        }
+    }
+
+    private fun showFeaturePending(name: String) {
+        android.app.AlertDialog.Builder(this).setTitle(name)
+            .setMessage("此模块属于电脑版功能范围，Android 版尚未完成对应推理引擎、文件流程和真机验证。当前不会显示为已可用。")
+            .setPositiveButton("知道了", null).show()
+    }
+
     private fun speak() {
         val text = input.text?.toString()?.trim().orEmpty()
         if (text.isBlank()) { Toast.makeText(this, "请先输入要朗读的文字", Toast.LENGTH_SHORT).show(); return }
-        if (!ttsReady) { Toast.makeText(this, "系统语音引擎尚未就绪", Toast.LENGTH_SHORT).show(); return }
-        if (tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "yovoice-preview") == TextToSpeech.ERROR) {
-            Toast.makeText(this, "朗读请求失败", Toast.LENGTH_SHORT).show()
+        val engine = tts
+        if (!ttsReady || engine == null) {
+            Toast.makeText(this, "系统 TTS 尚未就绪。请先选择语音引擎或安装中文语音数据。", Toast.LENGTH_LONG).show()
+            showTtsOptions()
+            return
         }
+        val language = runCatching { engine.setLanguage(Locale.SIMPLIFIED_CHINESE) }.getOrDefault(TextToSpeech.ERROR)
+        if (language == TextToSpeech.LANG_MISSING_DATA || language == TextToSpeech.LANG_NOT_SUPPORTED) {
+            val fallback = runCatching { engine.setLanguage(Locale.getDefault()) }.getOrDefault(TextToSpeech.ERROR)
+            if (fallback == TextToSpeech.LANG_MISSING_DATA || fallback == TextToSpeech.LANG_NOT_SUPPORTED || fallback == TextToSpeech.ERROR) {
+                Toast.makeText(this, "当前引擎没有可用的中文语音数据，请安装语音包或切换引擎。", Toast.LENGTH_LONG).show()
+                showTtsOptions(); return
+            }
+        }
+        val result = runCatching { engine.speak(text, TextToSpeech.QUEUE_FLUSH, null, "yovoice-preview") }.getOrDefault(TextToSpeech.ERROR)
+        if (result == TextToSpeech.ERROR) Toast.makeText(this, "朗读请求失败，请切换系统 TTS 引擎。", Toast.LENGTH_LONG).show()
     }
     private fun chooseAudio() {
         val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply { addCategory(Intent.CATEGORY_OPENABLE); type = "audio/*" }
@@ -323,13 +401,16 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         runOnUiThread {
             if (destroyed || isFinishing || isDestroyed) return@runOnUiThread
             ttsReady = result == TextToSpeech.SUCCESS
-            val language = if (ttsReady) runCatching { tts?.setLanguage(Locale.getDefault()) ?: TextToSpeech.ERROR }.getOrDefault(TextToSpeech.ERROR) else TextToSpeech.ERROR
+            val language = if (ttsReady) runCatching { tts?.setLanguage(Locale.SIMPLIFIED_CHINESE) ?: TextToSpeech.ERROR }.getOrDefault(TextToSpeech.ERROR) else TextToSpeech.ERROR
             val message = when {
                 !ttsReady -> "系统 TTS 初始化失败，请检查手机语音服务。"
-                language == TextToSpeech.LANG_MISSING_DATA || language == TextToSpeech.LANG_NOT_SUPPORTED -> "语音服务已启动，但当前语言数据缺失。"
+                language == TextToSpeech.LANG_MISSING_DATA || language == TextToSpeech.LANG_NOT_SUPPORTED -> "语音服务已启动，但缺少中文数据；可切换引擎或安装语音包。"
                 else -> "系统 TTS 已就绪，可以试听。"
             }
             if (::status.isInitialized) status.text = message
+            if (language == TextToSpeech.LANG_MISSING_DATA || language == TextToSpeech.LANG_NOT_SUPPORTED) {
+                runCatching { startActivity(Intent(TextToSpeech.Engine.ACTION_INSTALL_TTS_DATA)) }
+            }
         }
     }
     private fun releasePlayer() { runCatching { player?.stop() }; runCatching { player?.release() }; player = null }
