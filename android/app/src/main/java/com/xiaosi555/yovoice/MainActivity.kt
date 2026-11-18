@@ -341,13 +341,13 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
 
                 val output = File(cacheDir, "audio8-preview-${System.currentTimeMillis()}.wav")
                 runOnUiThread { if (!destroyed && ::status.isInitialized) status.text = "模型已加载，正在合成中文语音…" }
-                val result = JSONObject(NativeEngine.synthesize(text, "zh", output.absolutePath))
+                val result = JSONObject(NativeEngine.synthesize(text, "zh", output.absolutePath, speechRate, speechPitch))
                 check(result.optBoolean("ok")) { result.optString("error", "语音合成失败") }
                 check(output.isFile && output.length() > 44L) { "合成结果文件无效" }
 
                 runOnUiThread {
                     if (!destroyed && !isFinishing) {
-                        if (::status.isInitialized) status.text = "Audio8 本地合成完成 · ${output.length() / 1024} KB"
+                        if (::status.isInitialized) status.text = "Audio8 本地合成完成 · ${output.length() / 1024} KB" + if (result.optBoolean("styleControlsApplied")) " · 语速/音调已应用" else " · 此模型不支持音调/语速控制"
                         playAudio(Uri.fromFile(output))
                     }
                 }
