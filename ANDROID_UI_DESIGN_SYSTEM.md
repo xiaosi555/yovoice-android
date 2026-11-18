@@ -55,7 +55,7 @@ A model must expose distinct states: not downloaded, queued, downloading, paused
 
 ## Launcher icon
 
-Use an adaptive icon with foreground, background and monochrome layers. The foreground mark is a simple five-bar audio waveform. All layers use a 108 dp viewport; keep the visible mark inside the central 66 dp safe area. The monochrome layer supports themed launcher icons on compatible Android versions.
+Use an adaptive icon with foreground, background and monochrome layers. The foreground mark is a minimal single-stroke audio waveform. All layers use a 108 dp viewport; keep the visible mark inside the central 66 dp safe area. The monochrome layer supports themed launcher icons on compatible Android versions.
 
 ## Product information architecture (2026-11-18 update)
 

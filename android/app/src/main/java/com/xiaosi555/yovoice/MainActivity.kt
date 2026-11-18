@@ -1,6 +1,7 @@
 package com.xiaosi555.yovoice
 
 import androidx.activity.ComponentActivity
+import androidx.activity.OnBackPressedCallback
 import android.app.AlertDialog
 import android.content.Intent
 import android.graphics.Color
@@ -83,6 +84,7 @@ class MainActivity : ComponentActivity() {
     private lateinit var pitchLabel: TextView
     private lateinit var speedSeekBar: SeekBar
     private lateinit var pitchSeekBar: SeekBar
+    private var audioImportStatusView: TextView? = null
     private var asrStatusView: TextView? = null
     private var asrResultView: TextView? = null
     private var pendingTextExport: String = ""
@@ -132,11 +134,16 @@ class MainActivity : ComponentActivity() {
             else -> (resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES
         }
         if (dark == base.dark) return base
+        val accent = when {
+            dark && Color.luminance(base.accent) < 0.35f -> mixColor(base.accent, Color.WHITE, 0.72f)
+            !dark && Color.luminance(base.accent) > 0.75f -> mixColor(base.accent, Color.BLACK, 0.72f)
+            else -> base.accent
+        }
         return if (dark) Palette(base.name, mixColor(base.bg, Color.BLACK, 0.86f),
             mixColor(base.surface, Color.BLACK, 0.82f), 0xFFF1F3F4.toInt(), 0xFFADB5B8.toInt(),
-            base.accent, 0x33FFFFFF, true)
+            accent, 0x33FFFFFF, true)
         else Palette(base.name, mixColor(base.bg, Color.WHITE, 0.88f), 0xFFFFFFFF.toInt(),
-            0xFF202124.toInt(), 0xFF6F7478.toInt(), base.accent, 0x22181818, false)
+            0xFF202124.toInt(), 0xFF6F7478.toInt(), accent, 0x22181818, false)
     }
     private fun mixColor(from: Int, to: Int, amount: Float): Int = Color.rgb(
         (Color.red(from) * (1f - amount) + Color.red(to) * amount).toInt(),
@@ -164,6 +171,11 @@ class MainActivity : ComponentActivity() {
             ttsPrefs.getFloat("speech_pitch", 1.0f)).coerceIn(0.1f, 3.0f)
         applyModelLaunchIntent(intent)
         buildShell()
+        onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
+            override fun handleOnBackPressed() {
+                handleBackNavigation()
+            }
+        })
         initializeSystemTts()
     }
 
@@ -255,12 +267,12 @@ class MainActivity : ComponentActivity() {
             isFocusable = true
             setOnClickListener { page = 3; render() }
         }
-        row.addView(settings, LinearLayout.LayoutParams(dp(44), dp(44)))
+        row.addView(settings, LinearLayout.LayoutParams(dp(48), dp(48)))
         body.addView(row)
     }
 
     private fun renderStudio() {
-        renderHeader("语音工作室", "本地 AI 音频创作")
+        renderHeader("文字转语音", "输入文本、选择语音并生成音频")
         val ready = label("●  系统语音服务准备中", 12, 0xFF238A59.toInt(), true)
         ready.setPadding(dp(12), dp(9), dp(12), dp(9))
         ready.background = shape(if (p.dark) 0x33238A59 else 0x1A238A59, dp(30))
@@ -369,7 +381,8 @@ class MainActivity : ComponentActivity() {
                 ttsSubtitlePreview?.visibility = if (checked) View.VISIBLE else View.GONE
             }
         }
-        body.addView(subtitleToggle, marginTop(14))
+        body.addView(label("字幕", 16, p.text, true), marginTop(14))
+        body.addView(subtitleToggle, marginTop(6))
         ttsSubtitlePreview = label(input.text?.toString()?.trim().orEmpty().ifBlank { "输入文字后，这里显示字幕预览。" }, 13, p.text).apply {
             setPadding(dp(12), dp(10), dp(12), dp(10))
             background = shape(p.surface, dp(10), p.border, dp(1))
@@ -551,6 +564,14 @@ class MainActivity : ComponentActivity() {
         val workspaceFeature = activeWorkspaceFeature
         renderHeader(ModelFeatureGuide.features.firstOrNull { it.id == workspaceFeature }?.name ?: "创作工具",
             ModelFeatureGuide.features.firstOrNull { it.id == workspaceFeature }?.shortDescription ?: "开始创作")
+        if (workspaceFeature == "audio-import") {
+            val importPanel = card()
+            importPanel.addView(section("音频导入与试听", "从手机文件中选择音频，导入后直接试听"))
+            audioImportStatusView = label("尚未选择音频文件。", 12, p.secondary)
+            importPanel.addView(audioImportStatusView, marginTop(12))
+            importPanel.addView(primaryButton("选择音频文件") { chooseAudio() }, marginTop(10))
+            body.addView(importPanel, marginTop(10))
+        }
         if (workspaceFeature == null || workspaceFeature == "assistant") {
         val assistantPanel = card()
         assistantPanel.addView(section("AI 创作助手", "使用你配置的兼容服务，辅助润色、扩写、分镜和提示词"))
@@ -808,15 +829,17 @@ class MainActivity : ComponentActivity() {
         val familyArray = probe?.optJSONArray("families")
         val runtimeFamilies = if (familyArray == null) emptySet() else
             (0 until familyArray.length()).map { familyArray.optString(it) }.toSet()
-        val models = ModelCatalog.load(this)
+        val allFeatureModels = ModelCatalog.load(this)
             .filter { it.family in feature.modelFamilies }
-            .sortedWith(compareBy<ModelEntry>({ it.family !in runtimeFamilies }, { it.packageSize() }))
+            .sortedBy { it.packageSize() }
+        val compatibleModels = allFeatureModels.filter { it.family in runtimeFamilies }
+        val models = (if (compatibleModels.isNotEmpty()) compatibleModels else allFeatureModels).take(3)
         val content = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(18), dp(8), dp(18), dp(8))
         }
         content.addView(label("优先推荐当前 Android 引擎已编入的模型。下载完成还会逐文件校验 SHA-256。", 12, p.secondary))
-        if (!runtimeReady || models.none { it.family in runtimeFamilies }) {
+        if (!runtimeReady || compatibleModels.isEmpty()) {
             content.addView(label("当前设备运行时尚未报告此功能的可用模型家族。下列未适配模型仅供查看，不能作为可运行模型。", 12, 0xFF9A6428.toInt()).apply {
                 setPadding(dp(10), dp(8), dp(10), dp(8))
                 background = shape(0x1AFFB74D, dp(10))
@@ -848,7 +871,7 @@ class MainActivity : ComponentActivity() {
             titleRow.addView(titleColumn, LinearLayout.LayoutParams(0, -2, 1f))
             if (selectedNow) titleRow.addView(label("已选择", 11, p.accent, true))
             item.addView(titleRow)
-            val state = label(if (supported) "正在检查本地文件…" else "当前 Android 运行时未适配", 11,
+            val state = label(if (supported) "尚未校验本地文件" else "当前 Android 运行时未适配", 11,
                 if (supported) p.secondary else 0xFF9A6428.toInt())
             item.addView(state, marginTop(6))
             val action = TextView(this).apply {
@@ -856,12 +879,13 @@ class MainActivity : ComponentActivity() {
                 textSize = 12f
                 setPadding(dp(14), dp(7), dp(14), dp(7))
                 background = shape(p.bg, dp(9), p.border, dp(1))
-                minHeight = dp(40)
+                minHeight = dp(48)
             }
             item.addView(action, LinearLayout.LayoutParams(-2, -2).apply { topMargin = dp(8); gravity = Gravity.END })
             content.addView(item, marginTop(7))
             val uniqueName = "model-download-" + model.id
             var installed = false
+            var installedChecked = false
             var currentInfo: WorkInfo? = null
             var verifying = false
             fun updateAction(info: WorkInfo?) {
@@ -879,6 +903,10 @@ class MainActivity : ComponentActivity() {
                     state.text = "下载中 " + percent + "% · " + ModelEntry.formatBytes(done) + " / " + ModelEntry.formatBytes(total)
                     action.text = "暂停"
                     action.isEnabled = true
+                } else if (!installedChecked) {
+                    state.text = "点击检查本地文件；不会在打开弹窗时扫描全部大模型"
+                    action.text = "检查本地"
+                    action.isEnabled = model.isDownloadable()
                 } else if (installed) {
                     state.text = if (supported) "已下载并通过 SHA-256 校验 · 可供此功能选择" else "已下载并校验 · 运行时未适配"
                     action.text = if (supported) "设为当前模型" else "未适配"
@@ -900,6 +928,21 @@ class MainActivity : ComponentActivity() {
                 val info = currentInfo
                 if (info?.state == WorkInfo.State.RUNNING || info?.state == WorkInfo.State.ENQUEUED || info?.state == WorkInfo.State.BLOCKED) {
                     manager.cancelUniqueWork(uniqueName)
+                } else if (!installedChecked) {
+                    if (verifying) return@setOnClickListener
+                    verifying = true
+                    action.text = "校验中…"
+                    action.isEnabled = false
+                    storageExecutor.execute {
+                        val verified = runCatching { ModelCatalog.isInstalled(this, model) }.getOrDefault(false)
+                        runOnUiThread {
+                            verifying = false
+                            installedChecked = true
+                            installed = verified
+                            if (!destroyed && !isFinishing) updateAction(currentInfo)
+                        }
+                    }
+                    return@setOnClickListener
                 } else if (installed) {
                     if (!supported) return@setOnClickListener
                     getSharedPreferences("yovoice-model-selection", MODE_PRIVATE).edit().putString(featureId, model.id).apply()
@@ -918,23 +961,17 @@ class MainActivity : ComponentActivity() {
             manager.getWorkInfosForUniqueWorkLiveData(uniqueName).observe(this) { infos ->
                 val info = infos.firstOrNull()
                 updateAction(info)
-                if (info?.state == WorkInfo.State.SUCCEEDED && !installed && !verifying) {
+                if (info?.state == WorkInfo.State.SUCCEEDED && !installedChecked && !verifying) {
                     verifying = true
                     storageExecutor.execute {
                         val verified = runCatching { ModelCatalog.isInstalled(this, model) }.getOrDefault(false)
                         runOnUiThread {
                             verifying = false
                             installed = verified
+                            installedChecked = true
                             if (!destroyed && !isFinishing) updateAction(info)
                         }
                     }
-                }
-            }
-            storageExecutor.execute {
-                val verified = runCatching { ModelCatalog.isInstalled(this, model) }.getOrDefault(false)
-                runOnUiThread {
-                    installed = verified
-                    if (!destroyed && !isFinishing) updateAction(currentInfo)
                 }
             }
         }
@@ -952,8 +989,18 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    private fun markNativeModelIdle() {
+        runOnUiThread {
+            activeModelStatusView?.takeIf { it.isAttachedToWindow }?.apply {
+                text = if (nativeLoadedModelId == null) "模型已释放 · 再次调用时重新加载" else "已加载 · 等待再次调用"
+                setTextColor(p.secondary)
+            }
+        }
+    }
+
     private fun activateNativeTtsEngine() {
         nativeLoadedModelId = null
+        activeModelStatusView?.takeIf { it.isAttachedToWindow }?.apply { text = "已选择模型 · 等待本地引擎加载"; setTextColor(p.secondary) }
         ++ttsGeneration
         runCatching { tts?.stop() }
         runCatching { tts?.shutdown() }
@@ -1065,7 +1112,7 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun renderSettings() {
-        renderHeader("设置", "外观与设备语音服务")
+        renderHeader("我的", "外观、语音与设备设置")
         body.addView(label("外观模式", 17, p.text, true), marginTop(22))
         val modeRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
         listOf("system" to "跟随系统", "light" to "亮色", "dark" to "暗色").forEach { (mode, title) ->
@@ -1081,7 +1128,7 @@ class MainActivity : ComponentActivity() {
                     render()
                 }
             }
-            modeRow.addView(chip, LinearLayout.LayoutParams(0, dp(44), 1f).apply { if (mode != "system") leftMargin = dp(7) })
+            modeRow.addView(chip, LinearLayout.LayoutParams(0, dp(48), 1f).apply { if (mode != "system") leftMargin = dp(7) })
         }
         body.addView(modeRow, marginTop(9))
         body.addView(label("主题颜色", 17, p.text, true), marginTop(20))
@@ -1108,7 +1155,7 @@ class MainActivity : ComponentActivity() {
             }
             themeGrid.addView(item, GridLayout.LayoutParams(GridLayout.spec(index / 3, 1f), GridLayout.spec(index % 3, 1f)).apply {
                 width = 0
-                height = dp(46)
+                height = dp(48)
                 setMargins(dp(3), dp(4), dp(3), dp(4))
             })
         }
@@ -1307,7 +1354,7 @@ class MainActivity : ComponentActivity() {
         runCatching { ProjectStore.save(this, title, category, detail, file, mime) }
     }
 
-    override fun onBackPressed() {
+    private fun handleBackNavigation() {
         when {
             page == 0 -> {
                 page = 1
@@ -1328,7 +1375,7 @@ class MainActivity : ComponentActivity() {
             }
             else -> {
                 val now = SystemClock.elapsedRealtime()
-                if (now - lastBackPressedAt <= 2000L) super.onBackPressed()
+                if (now - lastBackPressedAt <= 2000L) finish()
                 else {
                     lastBackPressedAt = now
                     Toast.makeText(this, "再按一次返回键退出 Yovoice", Toast.LENGTH_SHORT).show()
@@ -1497,6 +1544,7 @@ class MainActivity : ComponentActivity() {
                 }
             } finally {
                 nativeBusy = false
+                markNativeModelIdle()
             }
         }
     }
@@ -1510,12 +1558,15 @@ class MainActivity : ComponentActivity() {
         if (::status.isInitialized) status.text = "正在释放本地模型并回收内存…"
         nativeExecutor.execute {
             runCatching { NativeEngine.unload() }
+            nativeLoadedModelId = null
+            markNativeModelIdle()
             runOnUiThread {
                 if (!destroyed && !isFinishing) {
                     if (::status.isInitialized) status.text = "本地模型已释放；再次使用时会重新加载"
                     Toast.makeText(this, "本地模型已释放", Toast.LENGTH_SHORT).show()
                 }
                 nativeBusy = false
+                markNativeModelIdle()
             }
         }
     }
@@ -1557,6 +1608,7 @@ class MainActivity : ComponentActivity() {
 
     private fun activateTtsProvider(provider: TtsProviderEntry, persist: Boolean = true) {
         nativeLoadedModelId = null
+        activeModelStatusView?.takeIf { it.isAttachedToWindow }?.apply { text = "已选择模型 · 当前使用系统语音引擎"; setTextColor(p.secondary) }
         val token = ++ttsGeneration
         runCatching { tts?.stop() }
         runCatching { tts?.shutdown() }
@@ -1679,7 +1731,10 @@ class MainActivity : ComponentActivity() {
             val uri = data.data!!
             try { contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION) } catch (_: Exception) {}
             when (requestCode) {
-                REQUEST_AUDIO -> playAudio(uri)
+                REQUEST_AUDIO -> {
+                    audioImportStatusView?.text = "已导入音频，正在准备播放。"
+                    playAudio(uri)
+                }
                 REQUEST_ASR_MEDIA -> transcribeMedia(uri)
                 REQUEST_CLONE_REFERENCE -> {
                     cloneReferenceUri = uri
@@ -1817,6 +1872,7 @@ class MainActivity : ComponentActivity() {
                 }
             } finally {
                 nativeBusy = false
+                markNativeModelIdle()
             }
         }
     }
@@ -1908,6 +1964,7 @@ class MainActivity : ComponentActivity() {
                 }
             } finally {
                 nativeBusy = false
+                markNativeModelIdle()
             }
         }
     }
@@ -1976,6 +2033,7 @@ class MainActivity : ComponentActivity() {
                 }
             } finally {
                 nativeBusy = false
+                markNativeModelIdle()
             }
         }
     }
@@ -2036,6 +2094,7 @@ class MainActivity : ComponentActivity() {
                 }
             } finally {
                 nativeBusy = false
+                markNativeModelIdle()
             }
         }
     }
@@ -2083,6 +2142,7 @@ class MainActivity : ComponentActivity() {
                 }
             } finally {
                 nativeBusy = false
+                markNativeModelIdle()
             }
         }
     }
@@ -2307,6 +2367,7 @@ class MainActivity : ComponentActivity() {
                 }
             } finally {
                 nativeBusy = false
+                markNativeModelIdle()
             }
         }
     }

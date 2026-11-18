@@ -62,10 +62,11 @@ class ModelCenterActivity : ComponentActivity() {
     } else android.graphics.Color.WHITE
     private val primaryText get() = if (paletteDark) 0xFFF1F3F4.toInt() else 0xFF202124.toInt()
     private val secondaryText get() = if (paletteDark) 0xFFADB5B8.toInt() else 0xFF6F7478.toInt()
-    private val accentColor get() = intArrayOf(0xFF18181A.toInt(),0xFFEDEDEF.toInt(),0xFF0B7A80.toInt(),0xFF9A4A24.toInt(),0xFF3B6B4C.toInt(),0xFF19C3CD.toInt())[themeIndex].let {
-        if (paletteDark && themeIndex == 0) 0xFFE8EAED.toInt()
-        else if (!paletteDark && themeIndex == 1) 0xFF242529.toInt()
-        else it
+    private val baseAccent get() = intArrayOf(0xFF18181A.toInt(),0xFFEDEDEF.toInt(),0xFF0B7A80.toInt(),0xFF9A4A24.toInt(),0xFF3B6B4C.toInt(),0xFF19C3CD.toInt())[themeIndex]
+    private val accentColor get() = when {
+        paletteDark && android.graphics.Color.luminance(baseAccent) < 0.35f -> mixColor(baseAccent, android.graphics.Color.WHITE, 0.72f)
+        !paletteDark && android.graphics.Color.luminance(baseAccent) > 0.75f -> mixColor(baseAccent, android.graphics.Color.BLACK, 0.72f)
+        else -> baseAccent
     }
     private fun mixColor(from: Int, to: Int, amount: Float): Int = android.graphics.Color.rgb(
         (android.graphics.Color.red(from) * (1f - amount) + android.graphics.Color.red(to) * amount).toInt(),
