@@ -771,7 +771,7 @@ class MainActivity : ComponentActivity() {
         copy.addView(label(selected?.name ?: "尚未选择 · 点击推荐模型", 14, p.text, true), marginTop(3))
         val modelState = label(
             if (selected == null) "推荐适配模型 · 可在此下载"
-            else if (nativeLoadedModelId == selected.id) "● 正在使用"
+            else if (nativeLoadedModelId == selected.id && (featureId != "tts" || activeTtsEngineId.startsWith("native:"))) "● 正在使用"
             else selected.family + " · " + selected.formattedSize() + " · 点击更换或下载",
             11, if (selected != null && nativeLoadedModelId == selected.id) 0xFF238A59.toInt() else p.secondary
         )
@@ -786,7 +786,7 @@ class MainActivity : ComponentActivity() {
                 runOnUiThread {
                     if (!destroyed && modelState.isAttachedToWindow) {
                         modelState.text = when {
-                            nativeLoadedModelId == model.id -> "● 正在使用 · 已加载到本地引擎"
+                            nativeLoadedModelId == model.id && (featureId != "tts" || activeTtsEngineId.startsWith("native:")) -> "● 正在使用 · 已加载到本地引擎"
                             installed -> model.family + " · 已下载并通过 SHA-256 校验"
                             else -> model.family + " · 未完整安装或校验失败"
                         }
@@ -862,7 +862,8 @@ class MainActivity : ComponentActivity() {
             var verifying = false
             fun updateAction(info: WorkInfo?) {
                 currentInfo = info
-                val downloading = info?.state in listOf(WorkInfo.State.RUNNING, WorkInfo.State.ENQUEUED, WorkInfo.State.BLOCKED)
+                val stateNow = info?.state
+                val downloading = stateNow == WorkInfo.State.RUNNING || stateNow == WorkInfo.State.ENQUEUED || stateNow == WorkInfo.State.BLOCKED
                 if (!model.isDownloadable()) {
                     state.text = "缺少可信文件校验信息，暂不能安全下载"
                     action.text = "不可下载"
@@ -880,7 +881,7 @@ class MainActivity : ComponentActivity() {
                     action.isEnabled = supported
                 } else {
                     state.text = when (info?.state) {
-                        WorkInfo.State.FAILED -> "下载失败：" + (info.outputData.getString("error") ?: "可重试")
+                        WorkInfo.State.FAILED -> "下载失败：" + (info?.outputData?.getString("error") ?: "可重试")
                         WorkInfo.State.CANCELLED -> "下载已暂停，可继续"
                         else -> if (supported) "尚未下载 · 可直接在此下载" else "运行时未适配 · 仅可在模型库查看"
                     }
@@ -893,7 +894,7 @@ class MainActivity : ComponentActivity() {
             }
             action.setOnClickListener {
                 val info = currentInfo
-                if (info?.state in listOf(WorkInfo.State.RUNNING, WorkInfo.State.ENQUEUED, WorkInfo.State.BLOCKED)) {
+                if (info?.state == WorkInfo.State.RUNNING || info?.state == WorkInfo.State.ENQUEUED || info?.state == WorkInfo.State.BLOCKED) {
                     manager.cancelUniqueWork(uniqueName)
                 } else if (installed) {
                     if (!supported) return@setOnClickListener
@@ -1522,6 +1523,7 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun activateTtsProvider(provider: TtsProviderEntry, persist: Boolean = true) {
+        nativeLoadedModelId = null
         val token = ++ttsGeneration
         runCatching { tts?.stop() }
         runCatching { tts?.shutdown() }
