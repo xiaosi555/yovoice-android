@@ -2883,8 +2883,16 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun refreshSystemVoices() {
-        val voices = runCatching { tts?.voices.orEmpty()
-            .sortedWith(compareBy({ !it.locale.language.equals("zh", true) }, { it.isNetworkConnectionRequired }, { it.name })) }.getOrDefault(emptyList())
+        val reportedVoices = runCatching { tts?.voices.orEmpty() }.getOrDefault(emptyList())
+        // MultiTTS always publishes a synthetic NOT_SET entry for its automatic/default
+        // speaker. It is not a real selectable speaker when imported voices exist.
+        val usableVoices = if (activeTtsEngineId.equals("org.nobody.multitts", true)) {
+            val actual = reportedVoices.filterNot { it.name.equals("NOT_SET", true) }
+            if (actual.isNotEmpty()) actual else emptyList()
+        } else reportedVoices
+        val voices = usableVoices.sortedWith(
+            compareBy({ !it.locale.language.equals("zh", true) }, { it.isNetworkConnectionRequired }, { it.name })
+        )
         availableTtsVoices = voices
         if (voices.isNotEmpty()) {
             val currentIndex = voices.indexOfFirst { it.name == selectedVoiceName }.let { if (it >= 0) it else 0 }
