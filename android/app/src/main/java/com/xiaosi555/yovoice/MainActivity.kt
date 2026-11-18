@@ -55,6 +55,11 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     private var asrStatusView: TextView? = null
     private var asrResultView: TextView? = null
     private var pendingTextExport: String = ""
+    private lateinit var cloneTextInput: EditText
+    private lateinit var cloneReferenceTextInput: EditText
+    private var cloneReferenceUri: Uri? = null
+    private var cloneStatusView: TextView? = null
+    private var pendingCloneExport: File? = null
 
     private data class Palette(val name: String, val bg: Int, val surface: Int, val text: Int, val secondary: Int, val accent: Int, val border: Int, val dark: Boolean)
     private val palettes = listOf(
@@ -213,7 +218,34 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         body.addView(toolRow("文字转语音", "选择手机系统 TTS 或本地 Audio8 引擎") { page = 0; render() }, marginTop(18))
         body.addView(toolRow("导入本地音频", "选择手机中的音频文件并播放") { chooseAudio() }, marginTop(10))
         body.addView(toolRow("模型与音色", "下载模型、查看本地安装状态") { page = 2; render() }, marginTop(10))
-        body.addView(toolRow("声音克隆", "需要接入对应的 Android 声音克隆推理后端") { showFeaturePending("声音克隆") }, marginTop(10))
+        val clonePanel = card()
+        clonePanel.addView(section("声音克隆", "Audio8 零样本克隆 · 需要参考音频及其准确转录文本"))
+        cloneTextInput = EditText(this).apply {
+            hint = "输入要用克隆声音朗读的内容"
+            minLines = 3
+            gravity = Gravity.TOP
+            textSize = 15f
+            setTextColor(p.text); setHintTextColor(p.secondary)
+            background = shape(p.bg, dp(12), p.border, dp(1))
+            setPadding(dp(12), dp(12), dp(12), dp(12))
+        }
+        clonePanel.addView(cloneTextInput, marginTop(12))
+        cloneReferenceTextInput = EditText(this).apply {
+            hint = "填写参考音频中实际说出的文字（尽量逐字准确）"
+            minLines = 2
+            gravity = Gravity.TOP
+            textSize = 14f
+            setTextColor(p.text); setHintTextColor(p.secondary)
+            background = shape(p.bg, dp(12), p.border, dp(1))
+            setPadding(dp(12), dp(12), dp(12), dp(12))
+        }
+        clonePanel.addView(cloneReferenceTextInput, marginTop(8))
+        clonePanel.addView(secondaryButton("选择参考音频") { chooseCloneReference() }, marginTop(8))
+        cloneStatusView = label("尚未选择参考音频。建议使用清晰、无背景音乐的短录音。", 12, p.secondary)
+        clonePanel.addView(cloneStatusView, marginTop(8))
+        clonePanel.addView(primaryButton("生成克隆语音") { cloneVoice() }, marginTop(10))
+        clonePanel.addView(secondaryButton("导出克隆语音 WAV") { exportCloneAudio() }, marginTop(8))
+        body.addView(clonePanel, marginTop(10))
         body.addView(toolRow("音频 / 视频转文字", "使用本地 Qwen3 ASR 识别音轨，支持常见音频与视频容器") { chooseAsrMedia() }, marginTop(10))
         asrStatusView = label("尚未选择待识别的音频或视频文件。", 12, p.secondary)
         body.addView(asrStatusView, marginTop(8))
@@ -477,11 +509,21 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             when (requestCode) {
                 REQUEST_AUDIO -> playAudio(uri)
                 REQUEST_ASR_MEDIA -> transcribeMedia(uri)
+                REQUEST_CLONE_REFERENCE -> {
+                    cloneReferenceUri = uri
+                    cloneStatusView?.text = "参考音频已选择，可以生成克隆语音。"
+                }
                 REQUEST_EXPORT_TXT -> runCatching {
                     contentResolver.openOutputStream(uri)?.bufferedWriter(Charsets.UTF_8)?.use { it.write(pendingTextExport) }
                         ?: error("无法创建导出文件")
                 }.onSuccess { Toast.makeText(this, "识别文本已导出", Toast.LENGTH_SHORT).show() }
                     .onFailure { Toast.makeText(this, "导出失败：" + (it.localizedMessage ?: "未知错误"), Toast.LENGTH_LONG).show() }
+                REQUEST_EXPORT_CLONE -> runCatching {
+                    val source = pendingCloneExport ?: error("没有可导出的克隆音频")
+                    contentResolver.openOutputStream(uri)?.use { output -> source.inputStream().use { it.copyTo(output) } }
+                        ?: error("无法创建导出文件")
+                }.onSuccess { Toast.makeText(this, "克隆语音已导出", Toast.LENGTH_SHORT).show() }
+                    .onFailure { Toast.makeText(this, "音频导出失败：" + (it.localizedMessage ?: "未知错误"), Toast.LENGTH_LONG).show() }
             }
         }
     }
@@ -573,6 +615,94 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         }
     }
 
+    private fun chooseCloneReference() {
+        val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+            addCategory(Intent.CATEGORY_OPENABLE)
+            type = "audio/*"
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION)
+        }
+        startActivityForResult(intent, REQUEST_CLONE_REFERENCE)
+    }
+
+    private fun exportCloneAudio() {
+        val source = pendingCloneExport
+        if (source == null || !source.isFile) {
+            Toast.makeText(this, "请先生成克隆语音", Toast.LENGTH_SHORT).show()
+            return
+        }
+        val intent = Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
+            addCategory(Intent.CATEGORY_OPENABLE)
+            type = "audio/wav"
+            putExtra(Intent.EXTRA_TITLE, "yovoice-cloned-voice.wav")
+        }
+        startActivityForResult(intent, REQUEST_EXPORT_CLONE)
+    }
+
+    private fun cloneVoice() {
+        val text = cloneTextInput.text?.toString()?.trim().orEmpty()
+        val referenceText = cloneReferenceTextInput.text?.toString()?.trim().orEmpty()
+        val referenceUri = cloneReferenceUri
+        if (text.isBlank() || referenceText.isBlank() || referenceUri == null) {
+            Toast.makeText(this, "请填写目标文本、参考音频转录，并选择参考音频", Toast.LENGTH_LONG).show()
+            return
+        }
+        if (nativeBusy) {
+            Toast.makeText(this, "本地推理引擎正在处理，请稍候", Toast.LENGTH_SHORT).show()
+            return
+        }
+        val model = runCatching { ModelCatalog.load(this).firstOrNull { it.id == "audio8-tts-0.6b-q8" } }.getOrNull()
+        if (model == null) {
+            Toast.makeText(this, "模型目录中没有 Audio8 TTS 模型", Toast.LENGTH_LONG).show()
+            return
+        }
+        nativeBusy = true
+        cloneStatusView?.text = "正在校验 Audio8 TTS 模型…"
+        nativeExecutor.execute {
+            try {
+                check(ModelCatalog.isInstalled(this, model)) {
+                    "请先在模型中心下载 Audio8 TTS Realistic 0.6B Q8 模型（约 1.43 GB）"
+                }
+                runOnUiThread {
+                    if (!destroyed && !isFinishing) cloneStatusView?.text = "正在解码参考音频（最多 30 秒）…"
+                }
+                val referencePcm = AndroidAudioDecoder.decodeTo16kMono(this, referenceUri, 30)
+                val modelRoot = ModelCatalog.installedDirectory(this, model.id)
+                val modelFile = File(modelRoot, model.localRelativePath(model.remotePath))
+                check(modelFile.isFile) { "Audio8 TTS 模型文件不存在，请重新下载" }
+                val loaded = JSONObject(NativeEngine.loadTaskModel(modelFile.absolutePath, model.family, "clon", "offline"))
+                check(loaded.optBoolean("ok")) { loaded.optString("error", "声音克隆模型加载失败") }
+                runOnUiThread {
+                    if (!destroyed && !isFinishing) cloneStatusView?.text = "模型已加载，正在克隆声音并生成语音…"
+                }
+                val outputDir = File(filesDir, "voice-clones")
+                if (!outputDir.exists() && !outputDir.mkdirs()) error("无法创建声音输出目录")
+                val output = File(outputDir, "clone-" + System.currentTimeMillis() + ".wav")
+                val result = JSONObject(NativeEngine.cloneVoice(
+                    text, referenceText, referencePcm, 16_000, 1, output.absolutePath
+                ))
+                check(result.optBoolean("ok")) { result.optString("error", "声音克隆生成失败") }
+                check(output.isFile && output.length() > 44L) { "克隆语音输出文件无效" }
+                pendingCloneExport = output
+                runOnUiThread {
+                    if (!destroyed && !isFinishing) {
+                        cloneStatusView?.text = "声音克隆完成 · " + (output.length() / 1024) + " KB"
+                        playAudio(Uri.fromFile(output))
+                        Toast.makeText(this, "克隆语音生成完成", Toast.LENGTH_SHORT).show()
+                    }
+                }
+            } catch (error: Throwable) {
+                runOnUiThread {
+                    if (!destroyed && !isFinishing) {
+                        cloneStatusView?.text = "克隆失败：" + (error.localizedMessage ?: error.javaClass.simpleName)
+                        Toast.makeText(this, "声音克隆失败，请检查模型和参考音频", Toast.LENGTH_LONG).show()
+                    }
+                }
+            } finally {
+                nativeBusy = false
+            }
+        }
+    }
+
     private fun playAudio(uri: Uri) {
         releasePlayer()
         try {
@@ -632,5 +762,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         private const val REQUEST_AUDIO = 4102
         private const val REQUEST_ASR_MEDIA = 4103
         private const val REQUEST_EXPORT_TXT = 4104
+        private const val REQUEST_CLONE_REFERENCE = 4105
+        private const val REQUEST_EXPORT_CLONE = 4106
     }
 }
