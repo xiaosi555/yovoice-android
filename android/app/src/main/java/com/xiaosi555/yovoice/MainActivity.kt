@@ -1033,21 +1033,51 @@ class MainActivity : ComponentActivity() {
 
     private fun renderSettings() {
         renderHeader("设置", "外观与设备语音服务")
-        body.addView(label("界面主题", 17, p.text, true), marginTop(22))
-        val themeGrid = GridLayout(this).apply { columnCount = 2; useDefaultMargins = false }
+        body.addView(label("外观模式", 17, p.text, true), marginTop(22))
+        val modeRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        listOf("system" to "跟随系统", "light" to "亮色", "dark" to "暗色").forEach { (mode, title) ->
+            val chip = TextView(this).apply {
+                text = (if (appearanceMode == mode) "✓ " else "") + title
+                gravity = Gravity.CENTER
+                textSize = 13f
+                setTextColor(if (appearanceMode == mode) p.accent else p.text)
+                background = shape(if (appearanceMode == mode) Color.argb(28, Color.red(p.accent), Color.green(p.accent), Color.blue(p.accent)) else p.surface, dp(12), p.border, dp(1))
+                setOnClickListener {
+                    appearanceMode = mode
+                    getSharedPreferences("yovoice-ui", MODE_PRIVATE).edit().putString("appearance", mode).apply()
+                    render()
+                }
+            }
+            modeRow.addView(chip, LinearLayout.LayoutParams(0, dp(44), 1f).apply { if (mode != "system") leftMargin = dp(7) })
+        }
+        body.addView(modeRow, marginTop(9))
+        body.addView(label("主题颜色", 17, p.text, true), marginTop(20))
+        val themeGrid = GridLayout(this).apply { columnCount = 3; useDefaultMargins = false }
         palettes.forEachIndexed { index, palette ->
-            val item = TextView(this).apply {
-                text = (if (themeIndex == index) "✓  " else "") + palette.name
-                textSize = 15f; setTextColor(palette.text)
-                setPadding(dp(16), dp(14), dp(16), dp(14))
-                background = shape(palette.surface, dp(13), palette.border, dp(1))
+            val item = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER
+                setPadding(dp(4), dp(8), dp(4), dp(8))
+                background = shape(palette.surface, dp(12), palette.border, dp(1))
+                val swatch = View(this@MainActivity).apply { background = shape(palette.accent, dp(8)) }
+                addView(swatch, LinearLayout.LayoutParams(dp(16), dp(16)))
+                addView(TextView(this@MainActivity).apply {
+                    text = (if (themeIndex == index) "✓ " else "") + palette.name
+                    textSize = 12f
+                    setTextColor(palette.text)
+                    setPadding(dp(5), 0, 0, 0)
+                })
                 setOnClickListener {
                     themeIndex = index
                     getSharedPreferences("yovoice-ui", MODE_PRIVATE).edit().putInt("theme", index).apply()
                     render()
                 }
             }
-            themeGrid.addView(item, GridLayout.LayoutParams(GridLayout.spec(index / 2, 1f), GridLayout.spec(index % 2, 1f)).apply { width = 0; height = dp(54); setMargins(dp(4), dp(5), dp(4), dp(5)) })
+            themeGrid.addView(item, GridLayout.LayoutParams(GridLayout.spec(index / 3, 1f), GridLayout.spec(index % 3, 1f)).apply {
+                width = 0
+                height = dp(46)
+                setMargins(dp(3), dp(4), dp(3), dp(4))
+            })
         }
         body.addView(themeGrid, marginTop(10))
         body.addView(label("语音引擎", 17, p.text, true), marginTop(24))
