@@ -15,6 +15,8 @@ import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.Spinner
 import android.widget.TextView
+import android.text.Editable
+import android.text.TextWatcher
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.core.view.setPadding
@@ -107,16 +109,72 @@ class ModelCenterActivity : ComponentActivity() {
             setOnClickListener { finish() }
         }, params().apply { bottomMargin = dp(8) })
 
-        val list = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         val models = ModelCatalog.load(this)
-        // A single-column list avoids GridLayout row measurement problems on
-        // narrow screens and keeps every model card fully visible and scrollable.
-        models.forEach { model ->
-            list.addView(createModelCard(model), params().apply {
-                topMargin = dp(5)
-                bottomMargin = dp(5)
-            })
+        val search = EditText(this).apply {
+            hint = "搜索模型名称或模型家族"
+            textSize = 14f
+            singleLine = true
+            setTextColor(primaryText)
+            setHintTextColor(secondaryText)
+            setPadding(dp(12), dp(8), dp(12), dp(8))
+            background = GradientDrawable().apply {
+                setColor(surface)
+                cornerRadius = dp(12).toFloat()
+                setStroke(dp(1), 0x33808080)
+            }
         }
+        root.addView(search, params().apply { topMargin = dp(6); bottomMargin = dp(6) })
+
+        val families = listOf("全部模型") + models.map { it.family }.distinct().sorted()
+        val familyPicker = Spinner(this).apply {
+            adapter = ArrayAdapter(this@ModelCenterActivity, android.R.layout.simple_spinner_dropdown_item, families)
+        }
+        root.addView(familyPicker, params().apply { bottomMargin = dp(8) })
+
+        val list = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        val empty = TextView(this).apply {
+            text = "没有找到匹配的模型"
+            textSize = 14f
+            setTextColor(secondaryText)
+            gravity = Gravity.CENTER
+            setPadding(dp(16), dp(28), dp(16), dp(28))
+            visibility = View.GONE
+        }
+        list.addView(empty, params())
+
+        fun refreshModels() {
+            val keyword = search.text?.toString()?.trim()?.lowercase(Locale.ROOT).orEmpty()
+            val family = familyPicker.selectedItem?.toString() ?: "全部模型"
+            val filtered = models.filter { model ->
+                (family == "全部模型" || model.family == family) &&
+                    (keyword.isEmpty() || model.name.lowercase(Locale.ROOT).contains(keyword) ||
+                        model.family.lowercase(Locale.ROOT).contains(keyword) ||
+                        model.id.lowercase(Locale.ROOT).contains(keyword))
+            }
+            list.removeAllViews()
+            if (filtered.isEmpty()) {
+                empty.visibility = View.VISIBLE
+                list.addView(empty, params())
+            } else {
+                empty.visibility = View.GONE
+                filtered.forEach { model ->
+                    list.addView(createModelCard(model), params().apply {
+                        topMargin = dp(5)
+                        bottomMargin = dp(5)
+                    })
+                }
+            }
+        }
+        search.addTextChangedListener(object : TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit
+            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) = refreshModels()
+            override fun afterTextChanged(s: Editable?) = Unit
+        })
+        familyPicker.onItemSelectedListener = object : android.widget.AdapterView.OnItemSelectedListener {
+            override fun onNothingSelected(parent: android.widget.AdapterView<*>?) = Unit
+            override fun onItemSelected(parent: android.widget.AdapterView<*>?, view: View?, position: Int, id: Long) = refreshModels()
+        }
+        refreshModels()
 
         val scroll = ScrollView(this).apply {
             isFillViewport = true
