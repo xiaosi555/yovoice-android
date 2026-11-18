@@ -163,8 +163,16 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        val initialPrefs = getSharedPreferences("yovoice-ui", MODE_PRIVATE)
+        val initialAppearance = initialPrefs.getString("appearance", "system") ?: "system"
+        val initialDark = when (initialAppearance) {
+            "light" -> false
+            "dark" -> true
+            else -> (resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES
+        }
+        setTheme(if (initialDark) R.style.YovoiceTheme_Dark else R.style.YovoiceTheme_Light)
         super.onCreate(savedInstanceState)
-        val uiPrefs = getSharedPreferences("yovoice-ui", MODE_PRIVATE)
+        val uiPrefs = initialPrefs
         themeIndex = uiPrefs.getInt("theme", 0).coerceIn(0, palettes.lastIndex)
         accentIndex = uiPrefs.getInt("accent", themeIndex).coerceIn(0, accentColors.lastIndex)
         appearanceMode = uiPrefs.getString("appearance", "system") ?: "system"

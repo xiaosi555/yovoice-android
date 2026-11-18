@@ -76,6 +76,13 @@ class ModelCenterActivity : ComponentActivity() {
     )
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        val appearance = getSharedPreferences("yovoice-ui", MODE_PRIVATE).getString("appearance", "system") ?: "system"
+        val dark = when (appearance) {
+            "light" -> false
+            "dark" -> true
+            else -> (resources.configuration.uiMode and android.content.res.Configuration.UI_MODE_NIGHT_MASK) == android.content.res.Configuration.UI_MODE_NIGHT_YES
+        }
+        setTheme(if (dark) R.style.YovoiceTheme_Dark else R.style.YovoiceTheme_Light)
         super.onCreate(savedInstanceState)
         try {
             workManager = WorkManager.getInstance(applicationContext)
