@@ -40,6 +40,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     @Volatile private var nativeBusy = false
     private val nativeExecutor = Executors.newSingleThreadExecutor()
     private val assistantExecutor = Executors.newSingleThreadExecutor()
+    private val storageExecutor = Executors.newSingleThreadExecutor()
     private lateinit var body: LinearLayout
     private lateinit var input: EditText
     private lateinit var status: TextView
@@ -523,11 +524,18 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         }, marginTop(4))
         body.addView(label("线程数会影响速度与耗电；内存有限时建议保持 2。修改后对下一次模型加载生效。", 12, p.secondary), marginTop(4))
         val modelDir = File(filesDir, "models")
-        val projectDir = File(filesDir, "projects")
-        val modelBytes = directoryBytes(modelDir)
-        val projectBytes = directoryBytes(projectDir)
-        val freeBytes = runCatching { android.os.StatFs(filesDir.absolutePath).availableBytes }.getOrDefault(0L)
-        body.addView(infoRow("本地存储", "模型：${formatStorage(modelBytes)} · 作品：${formatStorage(projectBytes)}\\n应用可用空间：${formatStorage(freeBytes)}\\n模型目录：${modelDir.absolutePath}"), marginTop(10))
+        val storageInfo = infoRow("本地存储", "正在统计手机内的模型与作品文件…")
+        body.addView(storageInfo, marginTop(10))
+        storageExecutor.execute {
+            val modelBytes = directoryBytes(modelDir)
+            val projectBytes = generatedStorageBytes()
+            val freeBytes = runCatching { android.os.StatFs(filesDir.absolutePath).availableBytes }.getOrDefault(0L)
+            runOnUiThread {
+                if (!destroyed && !isFinishing && !isDestroyed) {
+                    storageInfo.text = "本地存储\\n模型：${formatStorage(modelBytes)} · 作品：${formatStorage(projectBytes)}\\n应用可用空间：${formatStorage(freeBytes)}\\n模型目录：${modelDir.absolutePath}"
+                }
+            }
+        }
         body.addView(secondaryButton("打开系统应用设置") {
             val intent = Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:" + packageName))
             startActivity(intent)
@@ -649,8 +657,15 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
 
     private fun directoryBytes(directory: File): Long {
         if (!directory.exists()) return 0L
-        return directory.walkTopDown().filter { it.isFile }.sumOf { it.length() }
+        return runCatching {
+            directory.walkTopDown().filter { it.isFile }.sumOf { it.length() }
+        }.getOrDefault(0L)
     }
+
+    /** Generated media lives in separate app-private folders, not only in /projects. */
+    private fun generatedStorageBytes(): Long = listOf(
+        "projects", "voice-clones", "story-dubbing", "music", "stems", "midi"
+    ).sumOf { directoryBytes(File(filesDir, it)) }
 
     private fun formatStorage(bytes: Long): String {
         if (bytes < 1024L) return "$bytes B"
