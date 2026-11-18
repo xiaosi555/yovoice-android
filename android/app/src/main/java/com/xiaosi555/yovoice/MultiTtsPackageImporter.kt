@@ -110,6 +110,8 @@ object MultiTtsPackageImporter {
         val current = readMetadata(context, uri)
         val storedSize = root.optLong("fileSize", -1L)
         val storedModified = root.optLong("lastModified", -1L)
+        val storedName = root.optString("displayName")
+        if (storedName.isNotBlank() && current.displayName.isNotBlank() && storedName != current.displayName) return null
         if (storedSize > 0L && current.fileSize > 0L && storedSize != current.fileSize) return null
         if (storedModified > 0L && current.lastModified > 0L && storedModified != current.lastModified) return null
         context.contentResolver.openInputStream(uri)?.close() ?: return null
@@ -201,7 +203,7 @@ object MultiTtsPackageImporter {
         return result
     }
 
-    private fun parseSpeakers(
+    internal fun parseSpeakers(
         yaml: String,
         datPaths: List<String>,
         descTexts: Map<String, String>
