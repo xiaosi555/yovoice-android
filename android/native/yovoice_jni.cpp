@@ -38,6 +38,7 @@ struct RuntimeState {
     std::string family;
     std::string task;
     std::string mode;
+    std::string auxiliary_path;
 };
 
 std::mutex g_mutex;
@@ -196,12 +197,13 @@ Java_com_xiaosi555_yovoice_NativeEngine_nativeProbe(JNIEnv* env, jobject) {
 
 extern "C" JNIEXPORT jstring JNICALL
 Java_com_xiaosi555_yovoice_NativeEngine_nativeLoadModel(
-    JNIEnv* env, jobject, jstring model_path, jstring family, jstring task, jstring mode, jint threads
+    JNIEnv* env, jobject, jstring model_path, jstring family, jstring task, jstring mode, jstring auxiliary_path, jint threads
 ) {
     UtfChars path(env, model_path);
     UtfChars family_name(env, family);
     UtfChars task_name(env, task);
     UtfChars mode_name(env, mode);
+    UtfChars auxiliary(env, auxiliary_path);
     const std::string task_value = task_name.get()[0] == '\0' ? "tts" : task_name.get();
     const std::string mode_value = mode_name.get()[0] == '\0' ? "offline" : mode_name.get();
     if (path.get()[0] == '\0' || family_name.get()[0] == '\0') {
@@ -215,7 +217,8 @@ Java_com_xiaosi555_yovoice_NativeEngine_nativeLoadModel(
     if (g_state.session != nullptr &&
         g_state.model_path == path.get() &&
         g_state.family == family_name.get() &&
-        g_state.task == task_value && g_state.mode == mode_value) {
+        g_state.task == task_value && g_state.mode == mode_value &&
+        g_state.auxiliary_path == auxiliary.get()) {
         return make_string(env, "{\"ok\":true,\"alreadyLoaded\":true}");
     }
     release_state();
@@ -250,6 +253,9 @@ Java_com_xiaosi555_yovoice_NativeEngine_nativeLoadModel(
     audiocpp_options* options = audiocpp_options_create();
     if (options != nullptr) {
         audiocpp_options_set(options, "mem_saver", "true");
+        if (task_value == "asr" && auxiliary.get()[0] != '\0') {
+            audiocpp_options_set(options, "qwen3_asr.forced_aligner_path", auxiliary.get());
+        }
     }
     status = audiocpp_session_create(
         g_state.model, task_value.c_str(), mode_value.c_str(), &backend, options, &g_state.session
@@ -265,6 +271,7 @@ Java_com_xiaosi555_yovoice_NativeEngine_nativeLoadModel(
     g_state.family = family_name.get();
     g_state.task = task_value;
     g_state.mode = mode_value;
+    g_state.auxiliary_path = auxiliary.get();
     return make_string(env, "{\"ok\":true,\"alreadyLoaded\":false}");
 }
 
@@ -454,6 +461,9 @@ Java_com_xiaosi555_yovoice_NativeEngine_nativeTranscribe(
     env->ReleaseFloatArrayElements(pcm_array, samples, JNI_ABORT);
     if (status == AUDIOCPP_OK && language_name.get()[0] != '\0') {
         status = audiocpp_request_set_option(request, "language", language_name.get());
+    }
+    if (status == AUDIOCPP_OK) {
+        status = audiocpp_request_set_option(request, "return_timestamps", "true");
     }
     if (status != AUDIOCPP_OK) {
         const std::string message = status_message(status);
