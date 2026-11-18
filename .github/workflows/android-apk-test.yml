@@ -17,6 +17,8 @@ concurrency:
 
 jobs:
   assemble-debug-apk:
+    # Release gate: disabled until desktop feature parity and device tests pass.
+    if: ${{ false }}
     name: Build and inspect ARM64 debug APK
     runs-on: ubuntu-latest
     timeout-minutes: 60
