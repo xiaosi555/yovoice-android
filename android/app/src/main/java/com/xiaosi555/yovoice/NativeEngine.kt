@@ -47,9 +47,6 @@ object NativeEngine {
         nativeSynthesize(text, language, outputPath, speakingRate, pitchMultiplier)
     }.getOrElse { errorJson(it) }
 
-    /**
-     * PCM 必须是交错 float32，建议 16 kHz 单声道；音频解码/重采样由 Android 层负责。
-     */
     fun generateMusic(
         prompt: String,
         outputPath: String,
