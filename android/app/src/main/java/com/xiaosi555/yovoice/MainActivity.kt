@@ -1963,8 +1963,20 @@ class MainActivity : AppCompatActivity() {
                 showTtsOptions(); return
             }
         }
-        runCatching { engine.setSpeechRate(speechRate); engine.setPitch(speechPitch) }
-        selectedVoiceName?.let { name -> engine.voices?.firstOrNull { it.name == name }?.let { voice -> runCatching { engine.voice = voice } } }
+        val selectedVoice = selectedVoiceName?.let { name -> engine.voices?.firstOrNull { it.name == name } }
+        if (selectedVoice != null) {
+            val voiceResult = runCatching { engine.setVoice(selectedVoice) }.getOrDefault(TextToSpeech.ERROR)
+            if (voiceResult != TextToSpeech.SUCCESS) {
+                if (::status.isInitialized) status.text = "$activeTtsEngineLabel 无法应用已选音色，已取消本次合成。"
+                Toast.makeText(this, "所选音色当前不可用，请重新选择。", Toast.LENGTH_LONG).show()
+                return
+            }
+        }
+        val rateResult = runCatching { engine.setSpeechRate(speechRate) }.getOrDefault(TextToSpeech.ERROR)
+        val pitchResult = runCatching { engine.setPitch(speechPitch) }.getOrDefault(TextToSpeech.ERROR)
+        if ((rateResult != TextToSpeech.SUCCESS || pitchResult != TextToSpeech.SUCCESS) && ::status.isInitialized) {
+            status.text = "$activeTtsEngineLabel 不支持当前全部语音参数，将按引擎支持的参数合成。"
+        }
         val projectDir = File(filesDir, "projects")
         if (!projectDir.exists() && !projectDir.mkdirs()) {
             Toast.makeText(this, "无法创建语音项目目录", Toast.LENGTH_LONG).show()
@@ -2858,13 +2870,26 @@ class MainActivity : AppCompatActivity() {
                     addView(label(title, 14, p.text, true))
                     addView(label(detail, 11, p.secondary).apply { maxLines = 2 }, marginTop(3))
                     setOnClickListener {
-                        selectedVoiceName = voice.name
-                        getSharedPreferences("yovoice-tts", MODE_PRIVATE).edit()
-                            .putString("voice:" + activeTtsEngineId, voice.name).apply()
-                        val applied = runCatching { tts?.voice = voice }.isSuccess
-                        voicePicker.text = title
-                        if (!applied && ::status.isInitialized) status.text = "已选择音色，但当前引擎应用失败。"
-                        dialog.dismiss()
+                        val engine = tts
+                        val applied = engine != null && ttsReady &&
+                            runCatching { engine.setVoice(voice) == TextToSpeech.SUCCESS }.getOrDefault(false)
+                        if (applied) {
+                            selectedVoiceName = voice.name
+                            getSharedPreferences("yovoice-tts", MODE_PRIVATE).edit()
+                                .putString("voice:" + activeTtsEngineId, voice.name).apply()
+                            val rateResult = runCatching { engine!!.setSpeechRate(speechRate) }.getOrDefault(TextToSpeech.ERROR)
+                            val pitchResult = runCatching { engine!!.setPitch(speechPitch) }.getOrDefault(TextToSpeech.ERROR)
+                            voicePicker.text = title
+                            if (::status.isInitialized) {
+                                status.text = if (rateResult == TextToSpeech.SUCCESS && pitchResult == TextToSpeech.SUCCESS)
+                                    "已切换音色：$title"
+                                else "已切换音色：$title；当前引擎不支持全部语音参数。"
+                            }
+                            dialog.dismiss()
+                        } else {
+                            if (::status.isInitialized) status.text = "音色切换失败：引擎未接受该音色，原选择保持不变。"
+                            Toast.makeText(this@MainActivity, "当前引擎无法应用该音色，请尝试其他音色。", Toast.LENGTH_LONG).show()
+                        }
                     }
                 }
                 list.addView(row, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(6) })
@@ -2897,17 +2922,22 @@ class MainActivity : AppCompatActivity() {
         if (voices.isNotEmpty()) {
             val currentIndex = voices.indexOfFirst { it.name == selectedVoiceName }.let { if (it >= 0) it else 0 }
             val selected = voices[currentIndex]
-            selectedVoiceName = selected.name
-            getSharedPreferences("yovoice-tts", MODE_PRIVATE).edit()
-                .putString("voice:" + activeTtsEngineId, selected.name).apply()
-            val applied = runCatching {
-                tts?.voice = selected
-                tts?.setSpeechRate(speechRate)
-                tts?.setPitch(speechPitch)
-            }.isSuccess
-            if (::voicePicker.isInitialized) voicePicker.text = voiceDisplayName(selected, currentIndex)
-            if (!applied && ::status.isInitialized) {
-                status.text = activeTtsEngineLabel + " 已连接，但应用音色或语音参数失败；可尝试其他音色。"
+            val engine = tts
+            val applied = engine != null && ttsReady &&
+                runCatching { engine.setVoice(selected) == TextToSpeech.SUCCESS }.getOrDefault(false)
+            if (applied) {
+                selectedVoiceName = selected.name
+                getSharedPreferences("yovoice-tts", MODE_PRIVATE).edit()
+                    .putString("voice:" + activeTtsEngineId, selected.name).apply()
+                val rateResult = runCatching { engine!!.setSpeechRate(speechRate) }.getOrDefault(TextToSpeech.ERROR)
+                val pitchResult = runCatching { engine!!.setPitch(speechPitch) }.getOrDefault(TextToSpeech.ERROR)
+                if (::voicePicker.isInitialized) voicePicker.text = voiceDisplayName(selected, currentIndex)
+                if ((rateResult != TextToSpeech.SUCCESS || pitchResult != TextToSpeech.SUCCESS) && ::status.isInitialized) {
+                    status.text = activeTtsEngineLabel + " 已应用音色，但引擎不支持全部语音参数。"
+                }
+            } else {
+                if (::voicePicker.isInitialized) voicePicker.text = "音色应用失败，请重新选择"
+                if (::status.isInitialized) status.text = activeTtsEngineLabel + " 已连接，但引擎未接受默认音色；请手动选择其他音色。"
             }
         } else if (::voicePicker.isInitialized) {
             voicePicker.text = "当前引擎未提供可选音色"
