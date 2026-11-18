@@ -497,6 +497,66 @@ Java_com_xiaosi555_yovoice_NativeEngine_nativeTranscribe(
     return make_string(env, json.str());
 }
 
+extern "C" JNIEXPORT jstring JNICALL
+Java_com_xiaosi555_yovoice_NativeEngine_nativeGenerate(
+    JNIEnv* env, jobject, jstring prompt, jstring output_path,
+    jstring duration, jstring steps, jstring guidance, jstring seed
+) {
+    UtfChars prompt_text(env, prompt);
+    UtfChars output(env, output_path);
+    UtfChars duration_value(env, duration);
+    UtfChars steps_value(env, steps);
+    UtfChars guidance_value(env, guidance);
+    UtfChars seed_value(env, seed);
+    if (prompt_text.get()[0] == '\0' || output.get()[0] == '\0') {
+        return make_string(env, failure_json("音乐提示词或输出路径为空"));
+    }
+    std::lock_guard<std::mutex> lock(g_mutex);
+    if (g_state.session == nullptr || g_state.task != "gen") {
+        return make_string(env, failure_json("请先加载音乐生成模型"));
+    }
+    audiocpp_request* request = audiocpp_request_create();
+    if (request == nullptr) return make_string(env, failure_json("无法创建音乐生成请求"));
+    audiocpp_status status = audiocpp_request_set_text(request, prompt_text.get(), nullptr);
+    const char* keys[] = {"duration_sec", "num_inference_steps", "guidance_scale", "seed"};
+    const char* values[] = {duration_value.get(), steps_value.get(), guidance_value.get(), seed_value.get()};
+    for (size_t i = 0; i < 4 && status == AUDIOCPP_OK; ++i) {
+        if (values[i][0] != '\0') status = audiocpp_request_set_option(request, keys[i], values[i]);
+    }
+    if (status != AUDIOCPP_OK) {
+        const std::string message = status_message(status);
+        audiocpp_request_free(request);
+        return make_string(env, failure_json(message));
+    }
+    audiocpp_result* result = nullptr;
+    status = audiocpp_session_run(g_state.session, request, &result);
+    audiocpp_request_free(request);
+    if (status != AUDIOCPP_OK || result == nullptr) {
+        const std::string message = status_message(status);
+        if (result != nullptr) audiocpp_result_free(result);
+        return make_string(env, failure_json(message));
+    }
+    const float* samples = nullptr;
+    size_t frames = 0;
+    int sample_rate = 0;
+    int channels = 0;
+    status = audiocpp_result_audio(result, &samples, &frames, &sample_rate, &channels);
+    if (status != AUDIOCPP_OK) {
+        const std::string message = status_message(status);
+        audiocpp_result_free(result);
+        return make_string(env, failure_json(message));
+    }
+    std::string write_error;
+    const bool written = write_wav(output.get(), samples, frames, sample_rate, channels, &write_error);
+    audiocpp_result_free(result);
+    if (!written) return make_string(env, failure_json(write_error));
+    std::ostringstream json;
+    json << "{\"ok\":true,\"path\":\"" << json_escape(output.get())
+         << "\",\"frames\":" << frames << ",\"sampleRate\":" << sample_rate
+         << ",\"channels\":" << channels << "}";
+    return make_string(env, json.str());
+}
+
 extern "C" JNIEXPORT void JNICALL
 Java_com_xiaosi555_yovoice_NativeEngine_nativeUnload(JNIEnv*, jobject) {
     std::lock_guard<std::mutex> lock(g_mutex);
