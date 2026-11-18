@@ -46,6 +46,8 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     private lateinit var status: TextView
     private lateinit var nav: LinearLayout
     private var page = 0
+    private var selectedCreateFeature: String? = null
+    private var activeWorkspaceFeature: String? = null
     private var themeIndex = 0
     private var selectedVoiceName: String? = null
     private var speechRate = 1.0f
@@ -242,10 +244,69 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     }
 
     private fun renderCreate() {
-        renderHeader("创作工具", "从文字、音频开始你的创作")
-        body.addView(toolRow("文字转语音", "选择手机系统 TTS 或本地 Audio8 引擎") { page = 0; render() }, marginTop(18))
-        body.addView(toolRow("导入本地音频", "选择手机中的音频文件并播放") { chooseAudio() }, marginTop(10))
-        body.addView(toolRow("模型与音色", "下载模型、查看本地安装状态") { page = 2; render() }, marginTop(10))
+        val featureId = selectedCreateFeature
+        if (featureId == null) renderCreateGrid() else renderCreateFeature(featureId)
+    }
+
+    private fun renderCreateGrid() {
+        renderHeader("创作工坊", "选择一个功能开始创作")
+        body.addView(label("创作功能", 17, p.text, true), marginTop(18))
+        val grid = GridLayout(this).apply { columnCount = 2; useDefaultMargins = false }
+        ModelFeatureGuide.features.forEachIndexed { index, feature ->
+            val tile = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER_VERTICAL
+                setPadding(dp(15), dp(16), dp(15), dp(16))
+                background = shape(p.surface, dp(16), p.border, dp(1))
+                isClickable = true; isFocusable = true
+                setOnClickListener { selectedCreateFeature = feature.id; render() }
+                addView(label(feature.symbol, 25, p.accent, true))
+                addView(label(feature.name, 15, p.text, true).apply { setPadding(0, dp(9), 0, 0) })
+                addView(label(feature.shortDescription, 11, p.secondary).apply { setPadding(0, dp(5), 0, 0); maxLines = 2 })
+            }
+            grid.addView(tile, GridLayout.LayoutParams(GridLayout.spec(index / 2, 1f), GridLayout.spec(index % 2, 1f)).apply {
+                width = 0; height = dp(126); setMargins(dp(4), dp(4), dp(4), dp(4))
+            })
+        }
+        body.addView(grid, marginTop(8))
+        body.addView(toolRow("模型库", "按功能查看模型用途、文件大小和下载状态") { page = 2; render() }, marginTop(14))
+    }
+
+    private fun renderCreateFeature(featureId: String) {
+        val feature = ModelFeatureGuide.features.firstOrNull { it.id == featureId }
+        if (feature == null) { selectedCreateFeature = null; renderCreateGrid(); return }
+        renderHeader(feature.name, feature.description)
+        body.addView(textButton("‹ 返回创作功能", 13) { selectedCreateFeature = null; render() }, marginTop(8))
+        body.addView(label("功能说明", 16, p.text, true), marginTop(18))
+        body.addView(label(feature.purpose, 13, p.secondary).apply { setLineSpacing(dp(4).toFloat(), 1f) }, marginTop(7))
+        body.addView(label("推荐模型（按下载体积从小到大）", 16, p.text, true), marginTop(22))
+        val models = ModelCatalog.load(this).filter { it.family in feature.modelFamilies }.sortedBy { it.packageSize() }
+        if (models.isEmpty()) body.addView(label("当前模型目录没有登记该功能的专用模型。", 13, p.secondary), marginTop(8))
+        else models.take(8).forEach { model ->
+            val item = card()
+            item.addView(label(model.name, 14, p.text, true))
+            item.addView(label("${model.family} · ${model.precision} · ${model.formattedSize()}", 11, p.secondary).apply { setPadding(0, dp(4), 0, 0) })
+            item.addView(label(ModelFeatureGuide.modelPurpose(model.family), 12, p.secondary).apply { setPadding(0, dp(6), 0, 0) })
+            item.addView(textButton("在模型库查看 / 下载", 12) {
+                try { startActivity(Intent(this, ModelCenterActivity::class.java).putExtra("focus_family", model.family)) }
+                catch (error: Throwable) { Toast.makeText(this, "模型库打开失败：${error.localizedMessage}", Toast.LENGTH_LONG).show() }
+            }, marginTop(5))
+            body.addView(item, marginTop(8))
+        }
+        body.addView(primaryButton(feature.actionLabel) {
+            when (featureId) {
+                "tts" -> { page = 0; selectedCreateFeature = null; render() }
+                "audio-import" -> chooseAudio()
+                else -> { activeWorkspaceFeature = featureId; renderCreateWorkspace() }
+            }
+        }, marginTop(18))
+        body.addView(label(feature.runtimeNote, 11, p.secondary), marginTop(8))
+    }
+
+    private fun renderCreateWorkspace() {
+        val workspaceFeature = activeWorkspaceFeature
+        renderHeader("创作 · ${ModelFeatureGuide.features.firstOrNull { it.id == workspaceFeature }?.name ?: "工具"}", "当前功能的独立操作界面")
+        body.addView(textButton("‹ 返回功能说明", 13) { activeWorkspaceFeature = null; render() }, marginTop(8))
+        if (workspaceFeature == null || workspaceFeature == "assistant") {
         val assistantPanel = card()
         assistantPanel.addView(section("AI 创作助手", "使用你配置的兼容服务，辅助润色、扩写、分镜和提示词"))
         val assistantInput = EditText(this).apply {
@@ -270,6 +331,8 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             else requestAssistant(prompt, assistantOutput)
         }, marginTop(10))
         body.addView(assistantPanel, marginTop(10))
+        }
+        if (workspaceFeature == null || workspaceFeature == "clone") {
         val clonePanel = card()
         clonePanel.addView(section("声音克隆", "Audio8 零样本克隆 · 需要参考音频及其准确转录文本"))
         cloneTextInput = EditText(this).apply {
@@ -300,7 +363,9 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         clonePanel.addView(primaryButton("生成克隆语音") { cloneVoice() }, marginTop(10))
         clonePanel.addView(secondaryButton("导出克隆语音 WAV") { exportCloneAudio() }, marginTop(8))
         body.addView(clonePanel, marginTop(10))
+        }
 
+        if (workspaceFeature == null || workspaceFeature == "story") {
         val storyPanel = card()
         storyPanel.addView(section("故事配音", "多角色分句克隆 · 每行使用“角色名：台词”格式"))
         storyScriptInput = EditText(this).apply {
@@ -359,7 +424,9 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         storyPanel.addView(primaryButton("生成多角色故事配音") { generateStoryDubbing() }, marginTop(10))
         storyPanel.addView(secondaryButton("导出故事配音 WAV") { exportStoryDubbing() }, marginTop(8))
         body.addView(storyPanel, marginTop(10))
+        }
 
+        if (workspaceFeature == null || workspaceFeature == "asr") {
         body.addView(toolRow("音频 / 视频转文字", "使用本地 Qwen3 ASR 识别音轨，支持常见音频与视频容器") { chooseAsrMedia() }, marginTop(10))
         asrStatusView = label("尚未选择待识别的音频或视频文件。", 12, p.secondary)
         body.addView(asrStatusView, marginTop(8))
@@ -372,6 +439,8 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         body.addView(secondaryButton("导出识别文本 TXT") { exportTranscript() }, marginTop(8))
         body.addView(secondaryButton("导出 SRT 字幕") { exportSubtitle(false) }, marginTop(6))
         body.addView(secondaryButton("导出 WebVTT 字幕") { exportSubtitle(true) }, marginTop(6))
+        }
+        if (workspaceFeature == null || workspaceFeature == "music") {
         val musicPanel = card()
         musicPanel.addView(section("AI 音乐生成", "Stable Audio 3 Small · 根据文字描述生成音乐"))
         musicPromptInput = EditText(this).apply {
@@ -400,7 +469,9 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         musicPanel.addView(primaryButton("生成音乐") { generateMusic() }, marginTop(10))
         musicPanel.addView(secondaryButton("导出生成音乐 WAV") { exportMusic() }, marginTop(8))
         body.addView(musicPanel, marginTop(10))
+        }
 
+        if (workspaceFeature == null || workspaceFeature == "stems") {
         val stemPanel = card()
         stemPanel.addView(section("六轨音轨分离", "HTDemucs · 人声、鼓、贝斯、其他、吉他、钢琴"))
         stemPanel.addView(secondaryButton("选择音乐文件") { chooseStemAudio() }, marginTop(10))
@@ -410,7 +481,9 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         stemPanel.addView(stemResultsContainer, marginTop(8))
         stemPanel.addView(primaryButton("开始六轨分离") { separateAudio() }, marginTop(10))
         body.addView(stemPanel, marginTop(10))
+        }
 
+        if (workspaceFeature == null || workspaceFeature == "midi") {
         val midiPanel = card()
         midiPanel.addView(section("音频转 MIDI", "MuScriptor Small · 从音乐中提取音符与乐器事件"))
         midiPanel.addView(secondaryButton("选择待转换音乐") { chooseMidiAudio() }, marginTop(10))
@@ -427,6 +500,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         midiPanel.addView(primaryButton("开始转换 MIDI") { convertToMidi() }, marginTop(10))
         midiPanel.addView(secondaryButton("导出 MIDI 文件") { exportMidi() }, marginTop(8))
         body.addView(midiPanel, marginTop(10))
+        }
         body.addView(label("未完成 Android 引擎适配的功能会明确标注，不会伪装成可用。", 12, p.secondary), marginTop(18))
     }
 
