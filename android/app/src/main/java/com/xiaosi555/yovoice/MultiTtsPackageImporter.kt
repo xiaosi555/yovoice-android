@@ -78,9 +78,11 @@ object MultiTtsPackageImporter {
                 val config = readZipText(zip, configEntry, 4 * 1024 * 1024)
                 val engines = readZipText(zip, enginesEntry, 2 * 1024 * 1024)
                 val datPaths = entries.map { it.name.replace('\\', '/') }
-                    .filter {
-                        (it.startsWith("isstts/xTTSRes/") || it.contains("/isstts/xTTSRes/")) &&
-                            it.endsWith(".voc.dat", true)
+                    .filter { path ->
+                        val normalizedPath = path.lowercase(Locale.ROOT)
+                        (normalizedPath.startsWith("isstts/xttsres/") ||
+                            normalizedPath.contains("/isstts/xttsres/")) &&
+                            normalizedPath.endsWith(".dat")
                     }
                 val descTexts = entries.asSequence()
                     .filter { it.name.endsWith(".desc", true) }
@@ -217,9 +219,16 @@ object MultiTtsPackageImporter {
         datPaths: List<String>,
         descTexts: Map<String, String>
     ): List<MultiTtsSpeaker> {
-        val datByBase = datPaths.associateBy {
-            normalize(it.substringAfterLast('/').removeSuffix(".voc.dat"))
+        fun datBase(path: String): String {
+            val fileName = path.substringAfterLast('/')
+            val withoutExtension = when {
+                fileName.endsWith(".voc.dat", true) -> fileName.dropLast(".voc.dat".length)
+                fileName.endsWith(".dat", true) -> fileName.dropLast(".dat".length)
+                else -> fileName
+            }
+            return normalize(withoutExtension)
         }
+        val datByBase = datPaths.associateBy(::datBase)
         val result = mutableListOf<MultiTtsSpeaker>()
         var engineCode = ""
         var fields = linkedMapOf<String, String>()
@@ -229,13 +238,13 @@ object MultiTtsPackageImporter {
             if (code.isNotBlank() && name.isNotBlank()) {
                 val yamlDesc = fields["desc"].orEmpty()
                 val descMatchedDat = if (yamlDesc.isBlank()) null else datPaths.firstOrNull { path ->
-                    val base = normalize(path.substringAfterLast('/').removeSuffix(".voc.dat"))
+                    val base = datBase(path)
                     val content = descTexts[base].orEmpty()
                     content.isNotBlank() && normalize(content) == normalize(yamlDesc)
                 }
                 val dat = datByBase[normalize(code)] ?: descMatchedDat
                 val desc = descTexts[normalize(code)]
-                    ?: dat?.substringAfterLast('/')?.removeSuffix(".voc.dat")?.let { descTexts[normalize(it)] }
+                    ?: dat?.let(::datBase)?.let { descTexts[it] }
                 result += MultiTtsSpeaker(
                     engineCode, code, name, fields["desc"].orEmpty(),
                     fields["locale"].orEmpty(), dat, desc
@@ -248,8 +257,11 @@ object MultiTtsPackageImporter {
             if (line.isNotBlank() && !line.startsWith(" ") && trimmed.endsWith(":") && !trimmed.startsWith("-")) {
                 flush()
                 engineCode = trimmed.removeSuffix(":").trim()
-            } else if (trimmed.startsWith("- !!") && trimmed.contains("Speaker")) {
+            } else if ((trimmed.startsWith("- !!") && trimmed.contains("Speaker")) ||
+                (trimmed.startsWith("- ") && Regex("\\bcode\\s*:").containsMatchIn(trimmed))) {
                 flush()
+                val inline = Regex("\\b([A-Za-z][A-Za-z0-9_]*)\\s*:\\s*(.*)$").find(trimmed.removePrefix("- "))
+                if (inline != null) fields[inline.groupValues[1]] = scalar(inline.groupValues[2])
             } else {
                 val match = Regex("^\\s{2,}([A-Za-z][A-Za-z0-9_]*)\\s*:\\s*(.*)$").matchEntire(line)
                 if (match != null) fields[match.groupValues[1]] = scalar(match.groupValues[2])
