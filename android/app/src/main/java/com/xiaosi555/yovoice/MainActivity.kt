@@ -514,10 +514,8 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             return
         }
         val model = runCatching { ModelCatalog.load(this).firstOrNull { it.id == "qwen3-asr-0.6b-q8" } }.getOrNull()
-        if (model == null || !ModelCatalog.isInstalled(this, model)) {
-            Toast.makeText(this, "请先在模型中心下载 Qwen3 ASR 0.6B 模型包（约 2.28 GB，含识别模型与对齐器文件）", Toast.LENGTH_LONG).show()
-            page = 2
-            render()
+        if (model == null) {
+            Toast.makeText(this, "模型目录中没有 Qwen3 ASR 0.6B 条目", Toast.LENGTH_LONG).show()
             return
         }
         nativeBusy = true
@@ -525,6 +523,17 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         asrResultView?.text = "正在准备识别…"
         nativeExecutor.execute {
             try {
+                if (!ModelCatalog.isInstalled(this, model)) {
+                    runOnUiThread {
+                        if (!destroyed && !isFinishing) {
+                            asrStatusView?.text = "模型尚未完整安装或校验失败"
+                            Toast.makeText(this, "请先在模型中心下载 Qwen3 ASR 0.6B 模型包（约 2.28 GB，含识别模型与对齐器文件）", Toast.LENGTH_LONG).show()
+                            page = 2
+                            render()
+                        }
+                    }
+                    return@execute
+                }
                 val pcm = AndroidAudioDecoder.decodeTo16kMono(this, uri)
                 runOnUiThread {
                     if (!destroyed && !isFinishing) asrStatusView?.text =
