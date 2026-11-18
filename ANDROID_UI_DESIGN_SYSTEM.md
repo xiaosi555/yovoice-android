@@ -56,3 +56,12 @@ A model must expose distinct states: not downloaded, queued, downloading, paused
 ## Launcher icon
 
 Use an adaptive icon with foreground, background and monochrome layers. The foreground mark is a simple five-bar audio waveform. All layers use a 108 dp viewport; keep the visible mark inside the central 66 dp safe area. The monochrome layer supports themed launcher icons on compatible Android versions.
+
+## Product information architecture (2026-11-18 update)
+
+The creator-first page hierarchy and implementation requirements are defined in:
+- ANDROID_UI_REDESIGN_SPEC.md — page structure, navigation, component system, migration and acceptance criteria.
+- ANDROID_TTS_ENGINE_INTEGRATION.md — system TTS / MultiTTS / CloneTTS / Audio8 discovery, selection, initialization, voice loading and regression tests.
+
+These two technical specifications take precedence over any older screen hierarchy that gives model management primary navigation weight. The app opens to Creation; Models remains a secondary management destination. TTS engine restoration is a P0 prerequisite before broad UI migration.
+
