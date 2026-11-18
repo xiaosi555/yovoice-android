@@ -77,6 +77,27 @@ class MultiTtsPackageImporterTest {
     }
 
     @Test
+    fun preservesMultiTtsSpeakerIdSeparatelyFromAssetCode() {
+        val yaml = """
+            huoshan:
+            - !!org.nobody.multitts.tts.speaker.Speaker
+              id: huoshan_lfeichen_cn
+              code: lfeichen
+              desc: LingFeiChen
+              locale: zh-CN
+              name: 聆飞晨
+        """.trimIndent()
+        val speaker = MultiTtsPackageImporter.parseSpeakers(
+            yaml,
+            listOf("isstts/xTTSRes/lfeichen.voc.dat"),
+            mapOf("lfeichen" to "LingFeiChen")
+        ).single()
+        assertEquals("huoshan_lfeichen_cn", speaker.id)
+        assertEquals("lfeichen", speaker.code)
+        assertTrue(speaker.hasLocalData)
+    }
+
+    @Test
     fun parsesInlineSpeakerFieldsAndPlainDatExtension() {
         val yaml = """
             huoshan:
