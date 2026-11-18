@@ -84,6 +84,7 @@ class MainActivity : AppCompatActivity() {
     private var speechPitch = 1.0f
     private lateinit var voicePicker: TextView
     private var multiTtsPackage: MultiTtsPackageImporter.ImportedPackage? = null
+    private var pendingMultiTtsReturn = false
     private lateinit var enginePicker: TextView
     private lateinit var speedLabel: TextView
     private lateinit var pitchLabel: TextView
@@ -209,6 +210,23 @@ class MainActivity : AppCompatActivity() {
         applyModelLaunchIntent(intent)
         render()
     }
+
+    override fun onResume() {
+        super.onResume()
+        if (!pendingMultiTtsReturn) return
+        pendingMultiTtsReturn = false
+        val provider = TtsProviderRegistry.discover(this).firstOrNull {
+            it.packageName.equals("org.nobody.multitts", ignoreCase = true) ||
+                it.label.contains("MultiTTS", ignoreCase = true)
+        }
+        if (provider != null) {
+            activateTtsProvider(provider)
+            if (::status.isInitialized) status.text = "已连接 MultiTTS。正在读取其实际可用音色…"
+        } else if (::status.isInitialized) {
+            status.text = "尚未发现 MultiTTS 系统语音服务。请确认语音包已导入，并在手机“文字转语音输出”中启用 MultiTTS。"
+        }
+    }
+
 
     private fun applyModelLaunchIntent(source: Intent?) {
         val modelId = source?.getStringExtra("selected_model_id") ?: return
@@ -2005,6 +2023,51 @@ class MainActivity : AppCompatActivity() {
         startActivityForResult(intent, REQUEST_MULTITTS_PACKAGE)
     }
 
+    /**
+     * MultiTTS owns the DAT decoder. Hand the original SAF document to its
+     * ZIP import activity instead of pretending this app can decode the data.
+     */
+    private fun handoffPackageToMultiTts(uri: Uri) {
+        val packageName = "org.nobody.multitts"
+        val viewIntent = Intent(Intent.ACTION_VIEW).apply {
+            setPackage(packageName)
+            setDataAndType(uri, "application/zip")
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+        try {
+            pendingMultiTtsReturn = true
+            startActivity(viewIntent)
+            Toast.makeText(this, "已打开 MultiTTS，请在其中确认导入语音包；完成后返回本应用。", Toast.LENGTH_LONG).show()
+            return
+        } catch (_: ActivityNotFoundException) {
+            pendingMultiTtsReturn = false
+        } catch (_: SecurityException) {
+            pendingMultiTtsReturn = false
+        }
+
+        val launchIntent = runCatching { packageManager.getLaunchIntentForPackage(packageName) }.getOrNull()
+        if (launchIntent != null) {
+            pendingMultiTtsReturn = true
+            AlertDialog.Builder(this)
+                .setTitle("需要在 MultiTTS 中完成导入")
+                .setMessage("当前 MultiTTS 版本没有提供 ZIP 直接打开入口。接下来打开 MultiTTS，请在应用菜单中选择“导入数据”，选取刚才的 ZIP；完成后返回本应用。")
+                .setNegativeButton("稍后", null)
+                .setPositiveButton("打开 MultiTTS") { _, _ ->
+                    runCatching { startActivity(launchIntent) }.onFailure {
+                        pendingMultiTtsReturn = false
+                        Toast.makeText(this, "无法打开 MultiTTS：" + (it.localizedMessage ?: "未知错误"), Toast.LENGTH_LONG).show()
+                    }
+                }
+                .show()
+        } else {
+            AlertDialog.Builder(this)
+                .setTitle("尚未安装 MultiTTS")
+                .setMessage("本应用已识别 ZIP 中的音色配置和 DAT 文件，但不能独立解码 MultiTTS 专用 DAT。请先安装 MultiTTS，再导入该 ZIP 并将 MultiTTS 设为手机的文字转语音引擎。")
+                .setPositiveButton("知道了", null)
+                .show()
+        }
+    }
+
     private fun chooseAudio() {
         val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply { addCategory(Intent.CATEGORY_OPENABLE); type = "audio/*" }
         startActivityForResult(intent, REQUEST_AUDIO)
@@ -2028,11 +2091,10 @@ class MainActivity : AppCompatActivity() {
                             runOnUiThread {
                                 if (!destroyed && !isFinishing) {
                                     multiTtsPackage = imported
-                                    refreshSystemVoices()
                                     val localCount = imported.speakers.count { it.hasLocalData }
                                     if (::status.isInitialized) status.text =
-                                        "已导入 ${imported.engineName} · ${imported.speakers.size} 个音色 · 匹配到 $localCount 个本地 DAT 文件（仅完成索引）"
-                                    Toast.makeText(this, "MultiTTS 音色索引已建立；DAT 引擎加载尚未验证", Toast.LENGTH_LONG).show()
+                                        "已识别 ${imported.engineName} · ${imported.speakers.size} 个音色 · $localCount 个 DAT 文件；正在交给 MultiTTS 导入"
+                                    handoffPackageToMultiTts(uri)
                                 }
                             }
                         } catch (error: Throwable) {
