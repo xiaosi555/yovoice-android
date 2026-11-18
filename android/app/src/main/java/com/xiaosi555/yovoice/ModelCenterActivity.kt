@@ -43,11 +43,28 @@ class ModelCenterActivity : ComponentActivity() {
     @Volatile private var runtimeFamilies: Set<String> = emptySet()
     @Volatile private var runtimeReady: Boolean = false
     private val themeIndex by lazy { getSharedPreferences("yovoice-ui", MODE_PRIVATE).getInt("theme", 0).coerceIn(0, 5) }
-    private val pageBg get() = intArrayOf(0xFFF7F7F7.toInt(),0xFF0F0F11.toInt(),0xFFF1F6F6.toInt(),0xFFF3EEE4.toInt(),0xFFEFF3ED.toInt(),0xFF04181A.toInt())[themeIndex]
-    private val surface get() = intArrayOf(0xFFFFFFFF.toInt(),0xFF18181B.toInt(),0xFFFFFFFF.toInt(),0xFFFBF8F1.toInt(),0xFFFFFFFF.toInt(),0xFF082427.toInt())[themeIndex]
-    private val primaryText get() = intArrayOf(0xFF18181A.toInt(),0xFFEDEDEF.toInt(),0xFF0D2427.toInt(),0xFF2B241D.toInt(),0xFF1C2620.toInt(),0xFFE2F2F2.toInt())[themeIndex]
-    private val secondaryText get() = intArrayOf(0xFF77777D.toInt(),0xFF99999F.toInt(),0xFF61777A.toInt(),0xFF827568.toInt(),0xFF69776D.toInt(),0xFF9BBFC0.toInt())[themeIndex]
-    private val accentColor get() = intArrayOf(0xFF18181A.toInt(),0xFFEDEDEF.toInt(),0xFF0B7A80.toInt(),0xFF9A4A24.toInt(),0xFF3B6B4C.toInt(),0xFF19C3CD.toInt())[themeIndex]
+    private val appearanceMode by lazy { getSharedPreferences("yovoice-ui", MODE_PRIVATE).getString("appearance", "system") ?: "system" }
+    private val paletteDark: Boolean get() = when (appearanceMode) {
+        "light" -> false
+        "dark" -> true
+        else -> (resources.configuration.uiMode and android.content.res.Configuration.UI_MODE_NIGHT_MASK) == android.content.res.Configuration.UI_MODE_NIGHT_YES
+    }
+    private val baseBg get() = intArrayOf(0xFFF7F7F7.toInt(),0xFF0F0F11.toInt(),0xFFF1F6F6.toInt(),0xFFF3EEE4.toInt(),0xFFEFF3ED.toInt(),0xFF04181A.toInt())[themeIndex]
+    private val baseSurface get() = intArrayOf(0xFFFFFFFF.toInt(),0xFF18181B.toInt(),0xFFFFFFFF.toInt(),0xFFFBF8F1.toInt(),0xFFFFFFFF.toInt(),0xFF082427.toInt())[themeIndex]
+    private val pageBg get() = if (paletteDark) mixColor(baseBg, android.graphics.Color.BLACK, 0.86f) else mixColor(baseBg, android.graphics.Color.WHITE, 0.10f)
+    private val surface get() = if (paletteDark) mixColor(baseSurface, android.graphics.Color.BLACK, 0.82f) else android.graphics.Color.WHITE
+    private val primaryText get() = if (paletteDark) 0xFFF1F3F4.toInt() else 0xFF202124.toInt()
+    private val secondaryText get() = if (paletteDark) 0xFFADB5B8.toInt() else 0xFF6F7478.toInt()
+    private val accentColor get() = intArrayOf(0xFF18181A.toInt(),0xFFEDEDEF.toInt(),0xFF0B7A80.toInt(),0xFF9A4A24.toInt(),0xFF3B6B4C.toInt(),0xFF19C3CD.toInt())[themeIndex].let {
+        if (paletteDark && themeIndex == 0) 0xFFE8EAED.toInt()
+        else if (!paletteDark && themeIndex == 1) 0xFF242529.toInt()
+        else it
+    }
+    private fun mixColor(from: Int, to: Int, amount: Float): Int = android.graphics.Color.rgb(
+        (android.graphics.Color.red(from) * (1f - amount) + android.graphics.Color.red(to) * amount).toInt(),
+        (android.graphics.Color.green(from) * (1f - amount) + android.graphics.Color.green(to) * amount).toInt(),
+        (android.graphics.Color.blue(from) * (1f - amount) + android.graphics.Color.blue(to) * amount).toInt()
+    )
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -87,6 +104,11 @@ class ModelCenterActivity : ComponentActivity() {
 
     private fun buildPage() {
         WindowCompat.setDecorFitsSystemWindows(window, false)
+        window.statusBarColor = pageBg
+        window.navigationBarColor = pageBg
+        val systemBars = WindowCompat.getInsetsController(window, window.decorView)
+        systemBars.isAppearanceLightStatusBars = !paletteDark
+        systemBars.isAppearanceLightNavigationBars = !paletteDark
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(18))
@@ -135,12 +157,6 @@ class ModelCenterActivity : ComponentActivity() {
             setPadding(dp(12), dp(10), dp(12), dp(10))
             setBackgroundColor(0xFFFFF2DD.toInt())
         }, params().apply { topMargin = dp(10); bottomMargin = dp(10) })
-
-        root.addView(Button(this).apply {
-            text = "返回"
-            isAllCaps = false
-            setOnClickListener { finish() }
-        }, params().apply { bottomMargin = dp(8) })
 
         val models = ModelCatalog.load(this)
         val search = EditText(this).apply {
