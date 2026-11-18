@@ -50,6 +50,39 @@ object NativeEngine {
     /**
      * PCM 必须是交错 float32，建议 16 kHz 单声道；音频解码/重采样由 Android 层负责。
      */
+    fun generateMusic(
+        prompt: String,
+        outputPath: String,
+        durationSeconds: String = "20",
+        steps: String = "8",
+        guidance: String = "1",
+        seed: String = ""
+    ): String = runCatching {
+        ensureLoaded()
+        nativeGenerate(prompt, outputPath, durationSeconds, steps, guidance, seed)
+    }.getOrElse { errorJson(it) }
+
+    fun separateStems(
+        pcm: FloatArray,
+        sampleRate: Int,
+        channels: Int,
+        outputDirectory: String
+    ): String = runCatching {
+        ensureLoaded()
+        nativeSeparate(pcm, sampleRate, channels, outputDirectory)
+    }.getOrElse { errorJson(it) }
+
+    fun transcribeToMidi(
+        pcm: FloatArray,
+        sampleRate: Int,
+        channels: Int,
+        outputPath: String,
+        instruments: String = ""
+    ): String = runCatching {
+        ensureLoaded()
+        nativeMidi(pcm, sampleRate, channels, outputPath, instruments)
+    }.getOrElse { errorJson(it) }
+
     fun cloneVoice(
         text: String,
         referenceText: String,
@@ -91,5 +124,8 @@ object NativeEngine {
     private external fun nativeSynthesize(text: String, language: String, outputPath: String, speakingRate: Float, pitchMultiplier: Float): String
     private external fun nativeTranscribe(pcm: FloatArray, sampleRate: Int, channels: Int, language: String): String
     private external fun nativeClone(text: String, referenceText: String, referencePcm: FloatArray, sampleRate: Int, channels: Int, outputPath: String): String
+    private external fun nativeGenerate(prompt: String, outputPath: String, duration: String, steps: String, guidance: String, seed: String): String
+    private external fun nativeSeparate(pcm: FloatArray, sampleRate: Int, channels: Int, outputDirectory: String): String
+    private external fun nativeMidi(pcm: FloatArray, sampleRate: Int, channels: Int, outputPath: String, instruments: String): String
     private external fun nativeUnload()
 }
