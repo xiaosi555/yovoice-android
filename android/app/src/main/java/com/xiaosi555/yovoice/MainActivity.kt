@@ -363,20 +363,38 @@ class MainActivity : Activity() {
         }, marginTop(8))
         body.addView(label("功能说明", 16, p.text, true), marginTop(18))
         body.addView(label(feature.purpose, 13, p.secondary).apply { setLineSpacing(dp(4).toFloat(), 1f) }, marginTop(7))
-        body.addView(label("推荐模型（按下载体积从小到大）", 16, p.text, true), marginTop(22))
         val models = ModelCatalog.load(this).filter { it.family in feature.modelFamilies }.sortedBy { it.packageSize() }
-        if (models.isEmpty()) body.addView(label("当前模型目录没有登记该功能的专用模型。", 13, p.secondary), marginTop(8))
-        else models.take(8).forEach { model ->
-            val item = card()
-            item.addView(label(model.name, 14, p.text, true))
-            item.addView(label("${model.family} · ${model.precision} · ${model.formattedSize()}", 11, p.secondary).apply { setPadding(0, dp(4), 0, 0) })
-            item.addView(label(ModelFeatureGuide.modelPurpose(model.family), 12, p.secondary).apply { setPadding(0, dp(6), 0, 0) })
-            item.addView(iconListRow("download", "查看模型", "进入模型库下载，并查看安装与运行支持状态") {
-                try { startActivity(Intent(this, ModelCenterActivity::class.java).putExtra("focus_family", model.family).putExtra("focus_feature", featureId)) }
-                catch (error: Throwable) { Toast.makeText(this, "模型库打开失败：${error.localizedMessage}", Toast.LENGTH_LONG).show() }
-            }, marginTop(5))
-            body.addView(item, marginTop(8))
+        val savedModelId = getSharedPreferences("yovoice-model-selection", MODE_PRIVATE).getString(featureId, null)
+        val selectedModel = models.firstOrNull { it.id == savedModelId } ?: models.firstOrNull()
+        body.addView(label("当前引擎 / 模型", 13, p.secondary, true), marginTop(18))
+        val modelRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(13), dp(9), dp(12), dp(9))
+            background = ripple(p.surface, dp(13), p.border)
+            isClickable = true
+            isFocusable = true
+            contentDescription = "管理当前功能模型"
+            setOnClickListener {
+                val family = selectedModel?.family
+                try {
+                    startActivity(Intent(this@MainActivity, ModelCenterActivity::class.java)
+                        .putExtra("focus_feature", featureId)
+                        .putExtra("focus_family", family))
+                } catch (error: Throwable) {
+                    Toast.makeText(this@MainActivity, "模型库打开失败：${error.localizedMessage}", Toast.LENGTH_LONG).show()
+                }
+            }
         }
+        val modelText = column()
+        modelText.addView(label(selectedModel?.name ?: "尚无专用模型", 13, p.text, true))
+        modelText.addView(label(
+            if (selectedModel == null) "可进入模型库查看支持情况" else "${selectedModel.family} · ${selectedModel.formattedSize()} · 点击更换",
+            11, p.secondary
+        ).apply { setPadding(0, dp(3), 0, 0) })
+        modelRow.addView(modelText, LinearLayout.LayoutParams(0, -2, 1f))
+        modelRow.addView(LineIconView(this, "chevron", p.secondary), LinearLayout.LayoutParams(dp(20), dp(20)))
+        body.addView(modelRow, marginTop(7))
         body.addView(primaryButton(feature.actionLabel) {
             when (featureId) {
                 "tts" -> { page = 0; selectedCreateFeature = null; render() }
