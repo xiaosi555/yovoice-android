@@ -191,6 +191,12 @@ class ModelCenterActivity : ComponentActivity() {
         var installed = ModelCatalog.isInstalled(this, model)
 
         fun update(info: WorkInfo?) {
+            if (!downloadable) {
+                status.text = "目录缺少完整 SHA-256 校验信息，暂不可安全下载"
+                action.text = "暂不可下载"
+                action.isEnabled = false
+                return
+            }
             state = info?.state
             installed = ModelCatalog.isInstalled(this, model)
             when (info?.state) {
