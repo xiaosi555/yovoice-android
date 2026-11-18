@@ -6,7 +6,6 @@ import android.graphics.drawable.GradientDrawable
 import android.view.Gravity
 import android.view.ViewGroup
 import android.view.View
-import android.widget.GridLayout
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
@@ -110,15 +109,14 @@ class ModelCenterActivity : ComponentActivity() {
 
         val list = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         val models = ModelCatalog.load(this)
-        val grid = GridLayout(this).apply { columnCount = 2; useDefaultMargins = false }
-        models.forEachIndexed { index, model ->
-            val card = createModelCard(model)
-            grid.addView(card, GridLayout.LayoutParams(GridLayout.spec(index / 2, 1f), GridLayout.spec(index % 2, 1f)).apply {
-                width = 0; height = ViewGroup.LayoutParams.WRAP_CONTENT
-                setMargins(dp(5), dp(5), dp(5), dp(5))
+        // A single-column list avoids GridLayout row measurement problems on
+        // narrow screens and keeps every model card fully visible and scrollable.
+        models.forEach { model ->
+            list.addView(createModelCard(model), params().apply {
+                topMargin = dp(5)
+                bottomMargin = dp(5)
             })
         }
-        list.addView(grid, params())
 
         val scroll = ScrollView(this).apply {
             isFillViewport = true
@@ -174,6 +172,7 @@ class ModelCenterActivity : ComponentActivity() {
         }
         card.addView(status, params())
 
+        val downloadable = model.isDownloadable()
         val action = Button(this).apply {
             isAllCaps = false
             setTextColor(if (themeIndex == 1 || themeIndex == 5) 0xFF06191A.toInt() else 0xFFFFFFFF.toInt())
@@ -181,6 +180,12 @@ class ModelCenterActivity : ComponentActivity() {
             textSize = 12f
         }
         card.addView(action, params())
+        if (!downloadable) {
+            status.text = "目录缺少完整 SHA-256 校验信息，暂不可安全下载"
+            action.text = "暂不可下载"
+            action.isEnabled = false
+            action.alpha = 0.55f
+        }
         val uniqueName = "model-download-${model.id}"
         var state: WorkInfo.State? = null
         var installed = ModelCatalog.isInstalled(this, model)
@@ -223,6 +228,7 @@ class ModelCenterActivity : ComponentActivity() {
             update(infos.firstOrNull())
         }
         action.setOnClickListener {
+            if (!downloadable) return@setOnClickListener
             when (state) {
                 WorkInfo.State.RUNNING, WorkInfo.State.ENQUEUED, WorkInfo.State.BLOCKED -> {
                     workManager.cancelUniqueWork(uniqueName)
