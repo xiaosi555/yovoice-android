@@ -47,12 +47,12 @@ object MultiTtsPackageImporter {
         val stat = StatFs(cacheRoot.absolutePath)
         val availableBeforeCopy = stat.availableBytes
         val reserveBytes = 16L * 1024L * 1024L
-        require(metaSize < 0L || availableBeforeCopy > metaSize + reserveBytes) {
+        require(metaSize <= 0L || availableBeforeCopy > metaSize + reserveBytes) {
             "手机可用空间不足，无法临时读取音色包"
         }
         // Do not impose an arbitrary 1 GB package ceiling. When the document provider
         // cannot report a size, cap the copy to currently available space minus a reserve.
-        val copyLimit = if (metaSize >= 0L) metaSize else (availableBeforeCopy - reserveBytes).coerceAtLeast(0L)
+        val copyLimit = if (metaSize > 0L) metaSize else (availableBeforeCopy - reserveBytes).coerceAtLeast(0L)
         val archive = File(cacheRoot, "selected-package.zip")
         try {
             resolver.openInputStream(uri)?.use { input ->
@@ -156,7 +156,7 @@ object MultiTtsPackageImporter {
                     val nameIndex = cursor.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME)
                     val sizeIndex = cursor.getColumnIndex(android.provider.OpenableColumns.SIZE)
                     if (nameIndex >= 0) name = cursor.getString(nameIndex) ?: name
-                    if (sizeIndex >= 0) size = cursor.getLong(sizeIndex)
+                    if (sizeIndex >= 0 && !cursor.isNull(sizeIndex)) size = cursor.getLong(sizeIndex)
                 }
             }
         }
