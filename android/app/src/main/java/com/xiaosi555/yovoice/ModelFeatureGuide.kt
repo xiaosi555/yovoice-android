@@ -52,8 +52,6 @@ object ModelFeatureGuide {
         "muscriptor" to "从音频识别音符和乐器事件并生成 MIDI；当前 Android 已编入。",
         "sheetsage2" to "音乐理解 / 乐谱相关模型家族，不能与 MIDI 音源渲染混为一谈。",
         "soundfont" to "MIDI 播放和音色渲染所需的 SoundFont 音色库，不负责识别音符。",
-        "lyric_align" to "歌词与音频时间对齐，用于生成逐词或逐句时间标记。",
-        "fish_drama3" to "戏剧 / 多角色语音相关模型家族，文件体积很大，当前 Android 未声明支持。",
         "plapre" to "Plapre 3 文字转语音模型；目录标记任务为 TTS。",
         "gradium_phonon" to "Gradium Phonon 31M 英语语音合成模型，体积较小但当前标注为英语。",
         "lyric_align" to "强制对齐模型：将已有文本 / 歌词与音频对齐，估算词句时间戳，可辅助字幕时间轴校正。",
