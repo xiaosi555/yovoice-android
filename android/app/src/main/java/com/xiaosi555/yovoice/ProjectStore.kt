@@ -83,7 +83,7 @@ object ProjectStore {
 
     fun delete(context: Context, id: String) {
         val target = list(context).firstOrNull { it.id == id } ?: return
-        val root = File(context.applicationContext.filesDir, "projects").canonicalFile
+        val root = context.applicationContext.filesDir.canonicalFile
         val file = runCatching { File(target.filePath).canonicalFile }.getOrNull()
         if (file != null && file.path.startsWith(root.path + File.separator)) file.delete()
         val array = JSONArray()
