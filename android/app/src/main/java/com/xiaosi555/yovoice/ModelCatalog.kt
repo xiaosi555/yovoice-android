@@ -47,6 +47,23 @@ data class ModelEntry(
         it.size > 0L && it.sha256.matches(Regex("[a-fA-F0-9]{64}"))
     }
 
+    /** Match every installed-manifest record to this exact catalog package, in order. */
+    fun matchesManifestFiles(manifestFiles: org.json.JSONArray): Boolean = runCatching {
+        val expectedFiles = packageFiles()
+        if (manifestFiles.length() != expectedFiles.size) return false
+        for (index in expectedFiles.indices) {
+            val expected = expectedFiles[index]
+            val actual = manifestFiles.getJSONObject(index)
+            val expectedLocalPath = localRelativePath(expected.path).replace('\\', '/')
+            val actualLocalPath = actual.getString("localPath").replace('\\', '/')
+            if (actual.getString("remotePath") != expected.path) return false
+            if (actualLocalPath != expectedLocalPath) return false
+            if (actual.getLong("size") != expected.size) return false
+            if (!actual.optString("sha256").equals(expected.sha256, ignoreCase = true)) return false
+        }
+        true
+    }.getOrDefault(false)
+
     fun fileUrl(file: ModelAssetFile, source: String, catalogRevision: String): String {
         val selectedRepo = file.repo ?: repo
         val selectedRevision = file.revision ?: revision ?: catalogRevision
@@ -179,13 +196,16 @@ object ModelCatalog {
             if (!data.optBoolean("verified", false)) return false
             if (data.optString("version") != model.version) return false
             val files = data.getJSONArray("files")
-            if (files.length() != model.packageFiles().size) return false
+            if (!model.matchesManifestFiles(files)) return false
+            val expectedMain = model.localRelativePath(model.remotePath).replace('\\', '/')
+            if (data.optString("mainFile") != expectedMain) return false
+            val rootCanonical = root.canonicalFile
             for (i in 0 until files.length()) {
                 val entry = files.getJSONObject(i)
-                val relativePath = entry.getString("localPath")
-                val normalized = relativePath.replace('\\', '/')
+                val normalized = entry.getString("localPath").replace('\\', '/')
                 if (normalized.isBlank() || normalized.split('/').any { it.isBlank() || it == "." || it == ".." }) return false
-                val file = File(root, normalized)
+                val file = File(root, normalized).canonicalFile
+                if (!file.path.startsWith(rootCanonical.path + File.separator)) return false
                 if (!file.isFile || file.length() != entry.getLong("size")) return false
                 val expectedHash = entry.optString("sha256", "")
                 if (!expectedHash.matches(Regex("[a-fA-F0-9]{64}"))) return false
