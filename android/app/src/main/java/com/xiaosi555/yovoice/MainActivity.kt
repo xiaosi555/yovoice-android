@@ -183,17 +183,22 @@ class MainActivity : ComponentActivity() {
         mapped.forEach { prefs.putString(it.id, model.id) }
         prefs.apply()
         selectedCreateFeature = target.id
-        activeWorkspaceFeature = null
-        page = 1
+        if (target.id == "tts") {
+            activeWorkspaceFeature = null
+            page = 0
+        } else {
+            activeWorkspaceFeature = target.id
+            page = 1
+        }
     }
 
     private fun selectedFeatureModel(featureId: String, fallbackId: String): ModelEntry? {
         val selectedId = getSharedPreferences("yovoice-model-selection", MODE_PRIVATE)
-            .getString(featureId, fallbackId) ?: fallbackId
+            .getString(featureId, null) ?: return null
         val feature = ModelFeatureGuide.features.firstOrNull { it.id == featureId }
-        val models = ModelCatalog.load(this)
-        return models.firstOrNull { it.id == selectedId && (feature == null || it.family in feature.modelFamilies) }
-            ?: models.firstOrNull { it.id == fallbackId }
+        return ModelCatalog.load(this).firstOrNull {
+            it.id == selectedId && (feature == null || it.family in feature.modelFamilies)
+        }
     }
 
     private fun buildShell() {
@@ -1677,7 +1682,8 @@ class MainActivity : ComponentActivity() {
         }
         val model = selectedFeatureModel("asr", "qwen3-asr-0.6b-q8")
         if (model == null) {
-            Toast.makeText(this, "模型目录中没有 Qwen3 ASR 0.6B 条目", Toast.LENGTH_LONG).show()
+            Toast.makeText(this, "请先选择并下载适配的识别模型。", Toast.LENGTH_LONG).show()
+            showModelPicker("asr")
             return
         }
         nativeBusy = true
@@ -1786,7 +1792,8 @@ class MainActivity : ComponentActivity() {
         }
         val model = selectedFeatureModel("clone", "audio8-tts-0.6b-q8")
         if (model == null) {
-            Toast.makeText(this, "模型目录中没有 Audio8 TTS 模型", Toast.LENGTH_LONG).show()
+            Toast.makeText(this, "请先选择并下载适配的声音克隆模型。", Toast.LENGTH_LONG).show()
+            showModelPicker("clone")
             return
         }
         nativeBusy = true
@@ -1866,7 +1873,8 @@ class MainActivity : ComponentActivity() {
         if (nativeBusy) return
         val model = selectedFeatureModel("music", "stable-audio-3-small-music-q8")
         if (model == null) {
-            Toast.makeText(this, "模型目录中没有 Stable Audio 音乐模型", Toast.LENGTH_LONG).show()
+            Toast.makeText(this, "请先选择并下载适配的音乐模型。", Toast.LENGTH_LONG).show()
+            showModelPicker("music")
             return
         }
         nativeBusy = true
@@ -1913,7 +1921,8 @@ class MainActivity : ComponentActivity() {
         if (nativeBusy) return
         val model = selectedFeatureModel("stems", "htdemucs-6stems-q8")
         if (model == null) {
-            Toast.makeText(this, "模型目录中没有 HTDemucs 六轨模型", Toast.LENGTH_LONG).show()
+            Toast.makeText(this, "请先选择并下载适配的音轨分离模型。", Toast.LENGTH_LONG).show()
+            showModelPicker("stems")
             return
         }
         nativeBusy = true
@@ -1971,7 +1980,8 @@ class MainActivity : ComponentActivity() {
         if (nativeBusy) return
         val model = selectedFeatureModel("midi", "muscriptor-small-f32")
         if (model == null) {
-            Toast.makeText(this, "模型目录中没有 MuScriptor 模型", Toast.LENGTH_LONG).show()
+            Toast.makeText(this, "请先选择并下载适配的 MIDI 模型。", Toast.LENGTH_LONG).show()
+            showModelPicker("midi")
             return
         }
         nativeBusy = true
@@ -2173,7 +2183,8 @@ class MainActivity : ComponentActivity() {
         if (nativeBusy) return
         val model = selectedFeatureModel("story", "audio8-tts-0.6b-q8")
         if (model == null) {
-            Toast.makeText(this, "模型目录中没有 Audio8 TTS 模型", Toast.LENGTH_LONG).show()
+            Toast.makeText(this, "请先选择并下载适配的故事配音模型。", Toast.LENGTH_LONG).show()
+            showModelPicker("story")
             return
         }
         nativeBusy = true
