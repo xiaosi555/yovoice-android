@@ -99,8 +99,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     private fun renderHeader(title: String, subtitle: String) {
         val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
         val brand = column()
-        brand.addView(label("Yovoice", 15, p.text, true))
-        brand.addView(label(title, 29, p.text, true).apply { setPadding(0, dp(12), 0, 0) })
+        brand.addView(label(title, 27, p.text, true))
         brand.addView(label(subtitle, 13, p.secondary).apply { setPadding(0, dp(4), 0, 0) })
         row.addView(brand, LinearLayout.LayoutParams(0, -2, 1f))
         val settings = textButton("设置", 14) { page = 3; render() }
@@ -402,9 +401,6 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                 else -> "系统 TTS 已就绪，可以试听。"
             }
             if (::status.isInitialized) status.text = message
-            if (language == TextToSpeech.LANG_MISSING_DATA || language == TextToSpeech.LANG_NOT_SUPPORTED) {
-                runCatching { startActivity(Intent(TextToSpeech.Engine.ACTION_INSTALL_TTS_DATA)) }
-            }
         }
     }
     private fun releasePlayer() { runCatching { player?.stop() }; runCatching { player?.release() }; player = null }
