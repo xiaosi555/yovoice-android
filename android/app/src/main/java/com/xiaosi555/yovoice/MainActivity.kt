@@ -1793,6 +1793,9 @@ class MainActivity : AppCompatActivity() {
 
     private fun initializeSystemTts() {
         multiTtsPackage = MultiTtsPackageImporter.load(this)
+        if (multiTtsPackage == null && MultiTtsPackageImporter.hasSavedPackage(this) && ::status.isInitialized) {
+            status.text = "上次导入的 MultiTTS 音色包已失效或文件发生变化，请重新导入。"
+        }
         val prefs = getSharedPreferences("yovoice-tts", MODE_PRIVATE)
         if (prefs.getString("selected_tts_engine_id", null) == "native:audio8") {
             activeTtsEngineId = "native:audio8"

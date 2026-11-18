@@ -29,6 +29,9 @@ object MultiTtsPackageImporter {
 
     data class ImportedPackage(
         val uri: String,
+        val displayName: String,
+        val fileSize: Long,
+        val lastModified: Long,
         val engineName: String,
         val engineCode: String,
         val speakers: List<MultiTtsSpeaker>
@@ -36,10 +39,8 @@ object MultiTtsPackageImporter {
 
     fun import(context: Context, uri: Uri): ImportedPackage {
         val resolver = context.contentResolver
-        val metaSize = runCatching {
-            resolver.query(uri, arrayOf(android.provider.OpenableColumns.SIZE), null, null, null)
-                ?.use { if (it.moveToFirst()) it.getLong(0) else -1L } ?: -1L
-        }.getOrDefault(-1L)
+        val metadata = readMetadata(context, uri)
+        val metaSize = metadata.fileSize
         require(metaSize <= MAX_ARCHIVE_BYTES || metaSize < 0L) { "音色包超过 1 GB，暂不支持导入" }
         val cacheRoot = File(context.cacheDir, "multitts-import").apply {
             if (!exists() && !mkdirs()) error("无法创建导入缓存目录")
@@ -85,6 +86,9 @@ object MultiTtsPackageImporter {
                 val engineCode = parsed.first().engineCode
                 val packageResult = ImportedPackage(
                     uri.toString(),
+                    metadata.displayName,
+                    metadata.fileSize,
+                    metadata.lastModified,
                     engineMap[engineCode] ?: engineCode,
                     engineCode,
                     parsed
@@ -102,6 +106,13 @@ object MultiTtsPackageImporter {
         val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
         val raw = prefs.getString("index", null) ?: return null
         val root = JSONObject(raw)
+        val uri = Uri.parse(root.getString("uri"))
+        val current = readMetadata(context, uri)
+        val storedSize = root.optLong("fileSize", -1L)
+        val storedModified = root.optLong("lastModified", -1L)
+        if (storedSize > 0L && current.fileSize > 0L && storedSize != current.fileSize) return null
+        if (storedModified > 0L && current.lastModified > 0L && storedModified != current.lastModified) return null
+        context.contentResolver.openInputStream(uri)?.close() ?: return null
         val speakersJson = root.getJSONArray("speakers")
         val speakers = (0 until speakersJson.length()).map { i ->
             val item = speakersJson.getJSONObject(i)
@@ -111,8 +122,47 @@ object MultiTtsPackageImporter {
                 item.optString("descText").ifBlank { null }
             )
         }
-        ImportedPackage(root.getString("uri"), root.getString("engineName"), root.getString("engineCode"), speakers)
+        ImportedPackage(root.getString("uri"), root.optString("displayName"), storedSize, storedModified,
+            root.getString("engineName"), root.getString("engineCode"), speakers)
     }.getOrNull()
+
+    fun hasSavedPackage(context: Context): Boolean =
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).contains("index")
+
+    private data class UriMetadata(val displayName: String, val fileSize: Long, val lastModified: Long)
+
+    private fun readMetadata(context: Context, uri: Uri): UriMetadata {
+        var name = uri.lastPathSegment ?: "MultiTTS 音色包"
+        var size = -1L
+        var modified = -1L
+        runCatching {
+            context.contentResolver.query(
+                uri,
+                arrayOf(android.provider.OpenableColumns.DISPLAY_NAME, android.provider.OpenableColumns.SIZE),
+                null, null, null
+            )?.use { cursor ->
+                if (cursor.moveToFirst()) {
+                    val nameIndex = cursor.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME)
+                    val sizeIndex = cursor.getColumnIndex(android.provider.OpenableColumns.SIZE)
+                    if (nameIndex >= 0) name = cursor.getString(nameIndex) ?: name
+                    if (sizeIndex >= 0) size = cursor.getLong(sizeIndex)
+                }
+            }
+        }
+        runCatching {
+            context.contentResolver.query(
+                uri,
+                arrayOf(android.provider.DocumentsContract.Document.COLUMN_LAST_MODIFIED),
+                null, null, null
+            )?.use { cursor ->
+                if (cursor.moveToFirst()) {
+                    val index = cursor.getColumnIndex(android.provider.DocumentsContract.Document.COLUMN_LAST_MODIFIED)
+                    if (index >= 0) modified = cursor.getLong(index)
+                }
+            }
+        }
+        return UriMetadata(name, size, modified)
+    }
 
     private fun persist(context: Context, value: ImportedPackage) {
         val speakers = JSONArray()
@@ -128,6 +178,9 @@ object MultiTtsPackageImporter {
         }
         val json = JSONObject()
             .put("uri", value.uri)
+            .put("displayName", value.displayName)
+            .put("fileSize", value.fileSize)
+            .put("lastModified", value.lastModified)
             .put("engineName", value.engineName)
             .put("engineCode", value.engineCode)
             .put("speakers", speakers)
