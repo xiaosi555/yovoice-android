@@ -377,8 +377,7 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun renderCreate() {
-        val featureId = selectedCreateFeature
-        if (featureId == null) renderCreateGrid() else renderCreateFeature(featureId)
+        if (activeWorkspaceFeature == null) renderCreateGrid() else renderCreateWorkspace()
     }
 
     private fun renderCreateGrid() {
@@ -395,7 +394,19 @@ class MainActivity : ComponentActivity() {
                 isFocusable = true
                 contentDescription = "${feature.name}，${feature.shortDescription}"
                 background = ripple(p.surface, dp(15), p.border)
-                setOnClickListener { animatePress(this) { selectedCreateFeature = feature.id; render() } }
+                setOnClickListener {
+                    animatePress(this) {
+                        selectedCreateFeature = feature.id
+                        if (feature.id == "tts") {
+                            page = 0
+                            activeWorkspaceFeature = null
+                        } else {
+                            page = 1
+                            activeWorkspaceFeature = feature.id
+                        }
+                        render()
+                    }
+                }
                 val iconWrap = FrameLayout(this@MainActivity).apply {
                     background = shape(Color.argb(if (p.dark) 38 else 22, Color.red(p.accent), Color.green(p.accent), Color.blue(p.accent)), dp(17))
                     addView(LineIconView(this@MainActivity, featureIcon(feature.id), p.accent), FrameLayout.LayoutParams(dp(30), dp(30), Gravity.CENTER))
@@ -507,11 +518,8 @@ class MainActivity : ComponentActivity() {
     private fun renderCreateWorkspace() {
         body.removeAllViews()
         val workspaceFeature = activeWorkspaceFeature
-        renderHeader("创作 · ${ModelFeatureGuide.features.firstOrNull { it.id == workspaceFeature }?.name ?: "工具"}", "当前功能的独立操作界面")
-        body.addView(iconListRow("back", "返回功能", "返回功能说明与模型推荐") {
-            activeWorkspaceFeature = null
-            render()
-        }, marginTop(8))
+        renderHeader(ModelFeatureGuide.features.firstOrNull { it.id == workspaceFeature }?.name ?: "创作工具",
+            ModelFeatureGuide.features.firstOrNull { it.id == workspaceFeature }?.shortDescription ?: "开始创作")
         if (workspaceFeature == null || workspaceFeature == "assistant") {
         val assistantPanel = card()
         assistantPanel.addView(section("AI 创作助手", "使用你配置的兼容服务，辅助润色、扩写、分镜和提示词"))
@@ -706,6 +714,9 @@ class MainActivity : ComponentActivity() {
         midiPanel.addView(primaryButton("开始转换 MIDI") { convertToMidi() }, marginTop(10))
         midiPanel.addView(secondaryButton("导出 MIDI 文件") { exportMidi() }, marginTop(8))
         body.addView(midiPanel, marginTop(10))
+        }
+        if (!workspaceFeature.isNullOrBlank() && workspaceFeature != "assistant" && workspaceFeature != "audio-import") {
+            addFeatureModelSelector(workspaceFeature, body)
         }
         body.addView(label("未完成 Android 引擎适配的功能会明确标注，不会伪装成可用。", 12, p.secondary), marginTop(18))
     }
@@ -972,6 +983,36 @@ class MainActivity : ComponentActivity() {
 
     private fun saveProjectRecord(title: String, category: String, detail: String, file: File, mime: String) {
         runCatching { ProjectStore.save(this, title, category, detail, file, mime) }
+    }
+
+    override fun onBackPressed() {
+        when {
+            page == 0 -> {
+                page = 1
+                selectedCreateFeature = null
+                activeWorkspaceFeature = null
+                render()
+            }
+            activeWorkspaceFeature != null -> {
+                activeWorkspaceFeature = null
+                selectedCreateFeature = null
+                render()
+            }
+            page != 1 -> {
+                page = 1
+                selectedCreateFeature = null
+                activeWorkspaceFeature = null
+                render()
+            }
+            else -> {
+                val now = SystemClock.elapsedRealtime()
+                if (now - lastBackPressedAt <= 2000L) super.onBackPressed()
+                else {
+                    lastBackPressedAt = now
+                    Toast.makeText(this, "再按一次返回键退出 Yovoice", Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
     }
 
     private fun renderNav() {
