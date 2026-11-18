@@ -616,7 +616,7 @@ class ModelCenterActivity : AppCompatActivity() {
         }
     }
 
-    private fun enqueue(model: ModelEntry, uniqueName: String, source: String)
+    private fun enqueue(model: ModelEntry, uniqueName: String, source: String) {
         val request = OneTimeWorkRequestBuilder<ModelDownloadWorker>()
             .setInputData(workDataOf(
                 ModelDownloadWorker.KEY_MODEL_ID to model.id,
