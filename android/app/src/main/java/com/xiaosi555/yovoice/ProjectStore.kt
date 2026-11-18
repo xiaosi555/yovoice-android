@@ -61,9 +61,22 @@ object ProjectStore {
             mimeType,
             now
         )
-        val records = (list(context).filterNot { it.filePath == file.absolutePath } + record)
-            .sortedByDescending { it.createdAt }
-            .take(MAX_RECORDS)
+        val previous = list(context).filterNot { it.filePath == file.absolutePath }
+        val ordered = (previous + record).sortedByDescending { it.createdAt }
+        val records = ordered.take(MAX_RECORDS)
+        // Remove files that have just fallen out of the bounded history, but never
+        // touch files outside this app's private files directory or retained records.
+        val retainedPaths = records.mapTo(HashSet()) { runCatching { File(it.filePath).canonicalPath }.getOrDefault(it.filePath) }
+        val privateRoot = context.applicationContext.filesDir.canonicalFile
+        ordered.drop(MAX_RECORDS).forEach { expired ->
+            val expiredFile = runCatching { File(expired.filePath).canonicalFile }.getOrNull()
+            if (expiredFile != null &&
+                expiredFile.path.startsWith(privateRoot.path + File.separator) &&
+                expiredFile.path !in retainedPaths
+            ) {
+                runCatching { expiredFile.delete() }
+            }
+        }
         val array = JSONArray()
         records.forEach { item ->
             array.put(
