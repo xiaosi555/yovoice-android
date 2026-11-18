@@ -11,10 +11,10 @@ import java.nio.ByteOrder
 /** Decode the first audio track, downmix to mono and resample to 16 kHz float PCM. */
 object AndroidAudioDecoder {
     private const val TARGET_RATE = 16_000
-    private const val MAX_DURATION_US = 10L * 60L * 1_000_000L
-    private const val MAX_OUTPUT_SAMPLES = TARGET_RATE * 10 * 60
 
-    fun decodeTo16kMono(context: Context, uri: Uri): FloatArray {
+    fun decodeTo16kMono(context: Context, uri: Uri, maxDurationSeconds: Int = 600): FloatArray {
+        require(maxDurationSeconds in 1..600) { "音频时长限制必须在 1 到 600 秒之间" }
+        val maxOutputSamples = TARGET_RATE * maxDurationSeconds
         val extractor = MediaExtractor()
         var codec: MediaCodec? = null
         try {
@@ -31,7 +31,7 @@ object AndroidAudioDecoder {
             }
             check(audioTrack >= 0 && audioFormat != null) { "文件中没有可读取的音轨" }
             val duration = runCatching { audioFormat.getLong(MediaFormat.KEY_DURATION) }.getOrDefault(0L)
-            require(duration <= MAX_DURATION_US || duration == 0L) { "单次转录最多支持 10 分钟音频，请先裁剪文件" }
+            require(duration <= maxDurationSeconds.toLong() * 1_000_000L || duration == 0L) { "音频超过 ${maxDurationSeconds} 秒限制，请先裁剪文件" }
             extractor.selectTrack(audioTrack)
             val mime = audioFormat.getString(MediaFormat.KEY_MIME) ?: error("音频格式缺少 MIME")
             codec = MediaCodec.createDecoderByType(mime)
@@ -44,7 +44,7 @@ object AndroidAudioDecoder {
             var outputChannels = audioFormat.getInteger(MediaFormat.KEY_CHANNEL_COUNT)
             var outputEncoding = AudioFormat.ENCODING_PCM_16BIT
             val info = MediaCodec.BufferInfo()
-            val collector = ResampledMonoCollector(outputRate)
+            val collector = ResampledMonoCollector(outputRate, maxOutputSamples)
             var idleLoops = 0
 
             while (!outputEnded) {
@@ -120,7 +120,7 @@ object AndroidAudioDecoder {
         }
     }
 
-    private class ResampledMonoCollector(initialRate: Int) {
+    private class ResampledMonoCollector(initialRate: Int, private val maxOutputSamples: Int) {
         private var ratio = initialRate.coerceAtLeast(1).toDouble() / TARGET_RATE
         private var nextOutputAt = 0.0
         private var sourceIndex = 0L
@@ -152,8 +152,8 @@ object AndroidAudioDecoder {
         }
 
         private fun append(value: Float) {
-            require(count < MAX_OUTPUT_SAMPLES) { "解码后的音频超过 10 分钟限制" }
-            if (count == values.size) values = values.copyOf((values.size * 2).coerceAtMost(MAX_OUTPUT_SAMPLES))
+            require(count < maxOutputSamples) { "解码后的音频超过时长限制" }
+            if (count == values.size) values = values.copyOf((values.size * 2).coerceAtMost(maxOutputSamples))
             values[count++] = value
         }
 
