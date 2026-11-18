@@ -8,13 +8,22 @@ import android.media.MediaFormat
 import android.net.Uri
 import java.nio.ByteOrder
 
-/** Decode the first audio track, downmix to mono and resample to 16 kHz float PCM. */
+/** Decode a media audio track, downmix/upmix to one or two channels, and resample to float PCM. */
 object AndroidAudioDecoder {
-    private const val TARGET_RATE = 16_000
+    fun decodeTo16kMono(context: Context, uri: Uri, maxDurationSeconds: Int = 600): FloatArray =
+        decodeToPcm(context, uri, 16_000, 1, maxDurationSeconds)
 
-    fun decodeTo16kMono(context: Context, uri: Uri, maxDurationSeconds: Int = 600): FloatArray {
+    fun decodeToPcm(
+        context: Context,
+        uri: Uri,
+        targetSampleRate: Int,
+        targetChannels: Int,
+        maxDurationSeconds: Int = 600
+    ): FloatArray {
+        require(targetSampleRate in 8_000..96_000) { "目标采样率超出支持范围" }
+        require(targetChannels in 1..2) { "目标声道数仅支持单声道或立体声" }
         require(maxDurationSeconds in 1..600) { "音频时长限制必须在 1 到 600 秒之间" }
-        val maxOutputSamples = TARGET_RATE * maxDurationSeconds
+        val maxOutputSamples = targetSampleRate * targetChannels * maxDurationSeconds
         val extractor = MediaExtractor()
         var codec: MediaCodec? = null
         try {
@@ -31,7 +40,9 @@ object AndroidAudioDecoder {
             }
             check(audioTrack >= 0 && audioFormat != null) { "文件中没有可读取的音轨" }
             val duration = runCatching { audioFormat.getLong(MediaFormat.KEY_DURATION) }.getOrDefault(0L)
-            require(duration <= maxDurationSeconds.toLong() * 1_000_000L || duration == 0L) { "音频超过 ${maxDurationSeconds} 秒限制，请先裁剪文件" }
+            require(duration <= maxDurationSeconds.toLong() * 1_000_000L || duration == 0L) {
+                "音频超过 " + maxDurationSeconds + " 秒限制，请先裁剪文件"
+            }
             extractor.selectTrack(audioTrack)
             val mime = audioFormat.getString(MediaFormat.KEY_MIME) ?: error("音频格式缺少 MIME")
             codec = MediaCodec.createDecoderByType(mime)
@@ -44,7 +55,7 @@ object AndroidAudioDecoder {
             var outputChannels = audioFormat.getInteger(MediaFormat.KEY_CHANNEL_COUNT)
             var outputEncoding = AudioFormat.ENCODING_PCM_16BIT
             val info = MediaCodec.BufferInfo()
-            val collector = ResampledMonoCollector(outputRate, maxOutputSamples)
+            val collector = ResampledPcmCollector(outputRate, targetSampleRate, targetChannels, maxOutputSamples)
             var idleLoops = 0
 
             while (!outputEnded) {
@@ -91,18 +102,24 @@ object AndroidAudioDecoder {
                                 AudioFormat.ENCODING_PCM_8BIT -> 1
                                 else -> error("暂不支持此设备输出的 PCM 编码：$outputEncoding")
                             }
+                            require(outputChannels in 1..8) { "音频声道数异常：$outputChannels" }
                             val frames = pcm.remaining() / (bytesPerSample * outputChannels)
                             for (frame in 0 until frames) {
-                                var mixed = 0f
-                                repeat(outputChannels) {
-                                    val sample = when (outputEncoding) {
+                                val sourceFrame = FloatArray(outputChannels)
+                                for (channel in 0 until outputChannels) {
+                                    sourceFrame[channel] = when (outputEncoding) {
                                         AudioFormat.ENCODING_PCM_FLOAT -> pcm.float.coerceIn(-1f, 1f)
                                         AudioFormat.ENCODING_PCM_16BIT -> pcm.short / 32768f
                                         else -> ((pcm.get().toInt() and 0xff) - 128) / 128f
                                     }
-                                    mixed += sample
                                 }
-                                collector.add(mixed / outputChannels.coerceAtLeast(1))
+                                val mapped = when (targetChannels) {
+                                    1 -> floatArrayOf(sourceFrame.average().toFloat())
+                                    else -> if (outputChannels == 1) {
+                                        floatArrayOf(sourceFrame[0], sourceFrame[0])
+                                    } else floatArrayOf(sourceFrame[0], sourceFrame[1])
+                                }
+                                collector.add(mapped)
                             }
                         }
                         if ((info.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0) outputEnded = true
@@ -120,41 +137,54 @@ object AndroidAudioDecoder {
         }
     }
 
-    private class ResampledMonoCollector(initialRate: Int, private val maxOutputSamples: Int) {
-        private var ratio = initialRate.coerceAtLeast(1).toDouble() / TARGET_RATE
+    private class ResampledPcmCollector(
+        initialRate: Int,
+        private val targetRate: Int,
+        private val targetChannels: Int,
+        private val maxOutputSamples: Int
+    ) {
+        private var ratio = initialRate.coerceAtLeast(1).toDouble() / targetRate
         private var nextOutputAt = 0.0
         private var sourceIndex = 0L
-        private var previous: Float? = null
-        private var values = FloatArray(16_384)
+        private var previous: FloatArray? = null
+        private var values = FloatArray((targetRate * targetChannels).coerceAtMost(maxOutputSamples))
         private var count = 0
 
         fun updateSourceRate(rate: Int) {
             require(rate in 8_000..192_000) { "音频采样率异常：$rate Hz" }
-            ratio = rate.toDouble() / TARGET_RATE
+            ratio = rate.toDouble() / targetRate
         }
 
-        fun add(sample: Float) {
+        fun add(frame: FloatArray) {
+            require(frame.size == targetChannels) { "PCM 声道布局错误" }
             val prev = previous
             if (prev == null) {
-                append(sample)
-                previous = sample
+                append(frame)
+                previous = frame.copyOf()
                 sourceIndex = 0
                 nextOutputAt = ratio
                 return
             }
             while (nextOutputAt <= sourceIndex.toDouble()) {
                 val fraction = (nextOutputAt - (sourceIndex - 1).toDouble()).coerceIn(0.0, 1.0).toFloat()
-                append((prev + (sample - prev) * fraction).coerceIn(-1f, 1f))
+                val interpolated = FloatArray(targetChannels) { channel ->
+                    (prev[channel] + (frame[channel] - prev[channel]) * fraction).coerceIn(-1f, 1f)
+                }
+                append(interpolated)
                 nextOutputAt += ratio
             }
-            previous = sample
+            previous = frame.copyOf()
             sourceIndex++
         }
 
-        private fun append(value: Float) {
-            require(count < maxOutputSamples) { "解码后的音频超过时长限制" }
-            if (count == values.size) values = values.copyOf((values.size * 2).coerceAtMost(maxOutputSamples))
-            values[count++] = value
+        private fun append(frame: FloatArray) {
+            require(count + targetChannels <= maxOutputSamples) { "解码后的音频超过时长限制" }
+            val required = count + targetChannels
+            if (required > values.size) {
+                val nextSize = (values.size * 2).coerceAtLeast(required).coerceAtMost(maxOutputSamples)
+                values = values.copyOf(nextSize)
+            }
+            frame.forEach { values[count++] = it }
         }
 
         fun toArray(): FloatArray = values.copyOf(count)
