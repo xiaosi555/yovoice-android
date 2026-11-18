@@ -1,7 +1,7 @@
 package com.xiaosi555.yovoice
 
-import com.sun.net.httpserver.HttpServer
-import java.net.InetSocketAddress
+import java.net.ServerSocket
+import kotlin.concurrent.thread
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Test
@@ -40,17 +40,33 @@ class ModelDownloadSourceProbeTest {
         body: ByteArray,
         block: (String) -> Unit
     ) {
-        val server = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0)
-        server.createContext("/model.bin") { exchange ->
-            if (contentRange != null) exchange.responseHeaders.add("Content-Range", contentRange)
-            exchange.sendResponseHeaders(status, body.size.toLong())
-            exchange.responseBody.use { it.write(body) }
-        }
-        server.start()
-        try {
-            block("http://127.0.0.1:${server.address.port}/model.bin")
-        } finally {
-            server.stop(0)
+        ServerSocket(0).use { server ->
+            val worker = thread(name = "probe-test-http-server", isDaemon = true) {
+                server.accept().use { socket ->
+                    val reader = socket.getInputStream().bufferedReader(Charsets.US_ASCII)
+                    while (true) {
+                        val line = reader.readLine() ?: break
+                        if (line.isEmpty()) break
+                    }
+                    val reason = if (status == 206) "Partial Content" else "OK"
+                    val headers = buildString {
+                        append("HTTP/1.1 $status $reason\r\n")
+                        append("Content-Length: ${body.size}\r\n")
+                        append("Connection: close\r\n")
+                        if (contentRange != null) append("Content-Range: $contentRange\r\n")
+                        append("\r\n")
+                    }
+                    val output = socket.getOutputStream()
+                    output.write(headers.toByteArray(Charsets.US_ASCII))
+                    output.write(body)
+                    output.flush()
+                }
+            }
+            try {
+                block("http://127.0.0.1:${server.localPort}/model.bin")
+            } finally {
+                worker.join(2_000)
+            }
         }
     }
 }
