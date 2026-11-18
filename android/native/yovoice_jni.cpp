@@ -4,6 +4,7 @@
 #include <cmath>
 #include <cstdint>
 #include <fstream>
+#include <filesystem>
 #include <limits>
 #include <cmath>
 #include <mutex>
@@ -205,7 +206,7 @@ Java_com_xiaosi555_yovoice_NativeEngine_nativeLoadModel(
     if (path.get()[0] == '\0' || family_name.get()[0] == '\0') {
         return make_string(env, failure_json("模型路径或模型家族为空"));
     }
-    if ((task_value != "tts" && task_value != "asr" && task_value != "clon") || mode_value != "offline") {
+    if ((task_value != "tts" && task_value != "asr" && task_value != "clon" && task_value != "gen" && task_value != "sep" && task_value != "midi") || mode_value != "offline") {
         return make_string(env, failure_json("当前 Android 原生运行时仅开放离线 TTS、ASR 与声音克隆"));
     }
 
