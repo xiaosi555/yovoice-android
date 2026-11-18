@@ -107,8 +107,11 @@ class MainActivity : Activity() {
         super.onCreate(savedInstanceState)
         themeIndex = getSharedPreferences("yovoice-ui", MODE_PRIVATE).getInt("theme", 0).coerceIn(0, palettes.lastIndex)
         val ttsPrefs = getSharedPreferences("yovoice-tts", MODE_PRIVATE)
-        speechRate = ttsPrefs.getFloat("speech_rate", 1.0f).coerceIn(0.1f, 3.0f)
-        speechPitch = ttsPrefs.getFloat("speech_pitch", 1.0f).coerceIn(0.1f, 3.0f)
+        val savedEngineId = ttsPrefs.getString("selected_tts_engine_id", "system") ?: "system"
+        speechRate = ttsPrefs.getFloat("speech_rate:" + savedEngineId,
+            ttsPrefs.getFloat("speech_rate", 1.0f)).coerceIn(0.1f, 3.0f)
+        speechPitch = ttsPrefs.getFloat("speech_pitch:" + savedEngineId,
+            ttsPrefs.getFloat("speech_pitch", 1.0f)).coerceIn(0.1f, 3.0f)
         applyModelLaunchIntent(intent)
         buildShell()
         initializeSystemTts()
@@ -255,7 +258,15 @@ class MainActivity : Activity() {
             setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
                 override fun onProgressChanged(seekBar: SeekBar?, value: Int, fromUser: Boolean) {
                     speechRate = (value.coerceAtLeast(1) / 10f).coerceIn(0.1f, 3f)
-                    getSharedPreferences("yovoice-tts", MODE_PRIVATE).edit().putFloat("speech_rate", speechRate).apply()
+                    getSharedPreferences("yovoice-tts", MODE_PRIVATE).edit()
+                        .putFloat("speech_rate", speechRate)
+                        .putFloat("speech_rate:" + activeTtsEngineId, speechRate).apply()
+                    if (activeTtsEngineId != "native:audio8") {
+                        val result = runCatching { tts?.setSpeechRate(speechRate) ?: TextToSpeech.ERROR }.getOrDefault(TextToSpeech.ERROR)
+                        if (fromUser && result == TextToSpeech.ERROR && ::status.isInitialized) {
+                            status.text = activeTtsEngineLabel + " 不支持调整语速。"
+                        }
+                    }
                     speedLabel.text = "语速 %.1f×".format(speechRate)
                 }
                 override fun onStartTrackingTouch(seekBar: SeekBar?) {}
@@ -270,7 +281,15 @@ class MainActivity : Activity() {
             setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
                 override fun onProgressChanged(seekBar: SeekBar?, value: Int, fromUser: Boolean) {
                     speechPitch = (value.coerceAtLeast(1) / 10f).coerceIn(0.1f, 3f)
-                    getSharedPreferences("yovoice-tts", MODE_PRIVATE).edit().putFloat("speech_pitch", speechPitch).apply()
+                    getSharedPreferences("yovoice-tts", MODE_PRIVATE).edit()
+                        .putFloat("speech_pitch", speechPitch)
+                        .putFloat("speech_pitch:" + activeTtsEngineId, speechPitch).apply()
+                    if (activeTtsEngineId != "native:audio8") {
+                        val result = runCatching { tts?.setPitch(speechPitch) ?: TextToSpeech.ERROR }.getOrDefault(TextToSpeech.ERROR)
+                        if (fromUser && result == TextToSpeech.ERROR && ::status.isInitialized) {
+                            status.text = activeTtsEngineLabel + " 不支持调整音调。"
+                        }
+                    }
                     pitchLabel.text = "音调 %.1f×".format(speechPitch)
                 }
                 override fun onStartTrackingTouch(seekBar: SeekBar?) {}
@@ -1129,8 +1148,12 @@ class MainActivity : Activity() {
         ttsReady = false
         activeTtsEngineId = provider.packageName
         activeTtsEngineLabel = provider.label
-        selectedVoiceName = getSharedPreferences("yovoice-tts", MODE_PRIVATE)
-            .getString("voice:" + provider.packageName, null)
+        val enginePrefs = getSharedPreferences("yovoice-tts", MODE_PRIVATE)
+        selectedVoiceName = enginePrefs.getString("voice:" + provider.packageName, null)
+        speechRate = enginePrefs.getFloat("speech_rate:" + provider.packageName, speechRate).coerceIn(0.1f, 3.0f)
+        speechPitch = enginePrefs.getFloat("speech_pitch:" + provider.packageName, speechPitch).coerceIn(0.1f, 3.0f)
+        if (::speedLabel.isInitialized) speedLabel.text = "语速 %.1f×".format(speechRate)
+        if (::pitchLabel.isInitialized) pitchLabel.text = "音调 %.1f×".format(speechPitch)
         if (persist) {
             getSharedPreferences("yovoice-tts", MODE_PRIVATE).edit()
                 .putString("selected_tts_engine_id", provider.packageName).apply()
