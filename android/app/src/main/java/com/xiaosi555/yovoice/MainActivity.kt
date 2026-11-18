@@ -48,7 +48,7 @@ class MainActivity : Activity() {
     private lateinit var input: EditText
     private lateinit var status: TextView
     private lateinit var nav: LinearLayout
-    private var page = 0
+    private var page = 1
     private var selectedCreateFeature: String? = null
     private var activeWorkspaceFeature: String? = null
     private var themeIndex = 0
@@ -859,11 +859,25 @@ class MainActivity : Activity() {
 
     private fun renderNav() {
         nav.removeAllViews()
-        listOf("⌂" to "工作室", "♫" to "创作", "▦" to "模型", "▤" to "项目", "⚙" to "设置").forEachIndexed { index, pair ->
-            val targetPage = if (index == 4) 3 else if (index == 3) 4 else index
-            val item = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER; setOnClickListener { page = targetPage; render() } }
-            item.addView(LineIconView(this, arrayOf("home", "wave", "grid", "folder", "settings")[index], if (page == targetPage) p.accent else p.secondary), LinearLayout.LayoutParams(dp(24), dp(24)))
-            item.addView(label(pair.second, 11, if (page == targetPage) p.accent else p.secondary, page == targetPage).apply { gravity = Gravity.CENTER; setPadding(0, dp(2), 0, 0) })
+        // Primary navigation is intentionally creation-first. Model management remains a secondary entry.
+        listOf(
+            Triple("wave", "创作", 1),
+            Triple("folder", "项目", 4),
+            Triple("settings", "我的", 3)
+        ).forEach { (icon, title, targetPage) ->
+            val selected = page == targetPage || (targetPage == 1 && page == 0)
+            val item = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                gravity = Gravity.CENTER
+                isClickable = true
+                isFocusable = true
+                setOnClickListener { page = targetPage; selectedCreateFeature = null; activeWorkspaceFeature = null; render() }
+            }
+            item.addView(LineIconView(this, icon, if (selected) p.accent else p.secondary), LinearLayout.LayoutParams(dp(24), dp(24)))
+            item.addView(label(title, 11, if (selected) p.accent else p.secondary, selected).apply {
+                gravity = Gravity.CENTER
+                setPadding(0, dp(2), 0, 0)
+            })
             nav.addView(item, LinearLayout.LayoutParams(0, -1, 1f))
         }
     }
