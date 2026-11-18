@@ -29,9 +29,17 @@ object ModelDownloadSourceProbe {
             Triple(source, label, model.fileUrl(firstFile, source, revision))
         }.distinctBy { it.third }
 
-        return candidates.mapNotNull { (source, label, uri) ->
-            probe(source, label, uri, firstFile.size)
-        }.maxByOrNull { it.bytesPerSecond }
+        val pool = java.util.concurrent.Executors.newFixedThreadPool(candidates.size.coerceAtLeast(1))
+        return try {
+            val tasks = candidates.map { (source, label, uri) ->
+                java.util.concurrent.Callable { probe(source, label, uri, firstFile.size) }
+            }
+            pool.invokeAll(tasks, 9, java.util.concurrent.TimeUnit.SECONDS)
+                .mapNotNull { future -> runCatching { future.get() }.getOrNull() }
+                .maxByOrNull { it.bytesPerSecond }
+        } finally {
+            pool.shutdownNow()
+        }
     }
 
     private fun probe(source: String, label: String, uri: String, expectedSize: Long): DownloadSourceSpeed? {

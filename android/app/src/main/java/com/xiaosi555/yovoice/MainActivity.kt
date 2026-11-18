@@ -2767,8 +2767,13 @@ class MainActivity : AppCompatActivity() {
                     it.code.equals(voice.name, true) || voice.name.contains(it.code, true)
                 }
                 val title = voiceDisplayName(voice, index)
-                val detail = mapped?.description?.takeIf { it.isNotBlank() }
-                    ?: "${voice.locale.toLanguageTag()} · " +
+                val detail = mapped?.let { speaker ->
+                    listOfNotNull(
+                        speaker.description.takeIf { it.isNotBlank() },
+                        if (speaker.hasLocalData) "已匹配本地音色资源" else null,
+                        if (voice.isNetworkConnectionRequired) "需要网络" else "离线可用"
+                    ).joinToString(" · ")
+                } ?: "${voice.locale.toLanguageTag()} · " +
                     if (voice.isNetworkConnectionRequired) "需要网络" else "离线可用"
                 val row = LinearLayout(this).apply {
                     orientation = LinearLayout.VERTICAL

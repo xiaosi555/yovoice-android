@@ -209,8 +209,7 @@ class ModelCenterActivity : AppCompatActivity() {
             background = GradientDrawable().apply {
                 setColor(surface)
                 cornerRadius = dp(12).toFloat()
-                setStroke(dp(1), 0x33808080)
-            }
+                }
         }
         root.addView(search, params().apply { topMargin = dp(6); bottomMargin = dp(6) })
 
@@ -571,7 +570,6 @@ class ModelCenterActivity : AppCompatActivity() {
         background = GradientDrawable().apply {
             setColor(surface)
             cornerRadius = dp(12).toFloat()
-            setStroke(dp(1), 0x22808080)
         }
         addView(LineIconView(this@ModelCenterActivity, "info", secondaryText),
             FrameLayout.LayoutParams(dp(20), dp(20), Gravity.CENTER))
@@ -615,7 +613,6 @@ class ModelCenterActivity : AppCompatActivity() {
         view.background = GradientDrawable().apply {
             setColor(surface)
             cornerRadius = dp(14).toFloat()
-            setStroke(dp(1), if (enabled) 0x55808080 else 0x22808080)
         }
     }
 
