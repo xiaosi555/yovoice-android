@@ -30,12 +30,14 @@ import androidx.work.WorkManager
 import androidx.work.workDataOf
 import java.util.concurrent.TimeUnit
 import java.util.Locale
+import java.util.concurrent.Executors
 import org.json.JSONObject
 
 class ModelCenterActivity : ComponentActivity() {
     private lateinit var workManager: WorkManager
     private lateinit var sourcePicker: Spinner
     private val downloadStates = mutableMapOf<String, WorkInfo.State?>()
+    private val modelCheckExecutor = Executors.newFixedThreadPool(2)
     @Volatile private var runtimeFamilies: Set<String> = emptySet()
     @Volatile private var runtimeReady: Boolean = false
     private val themeIndex by lazy { getSharedPreferences("yovoice-ui", MODE_PRIVATE).getInt("theme", 0).coerceIn(0, 5) }
@@ -249,15 +251,7 @@ class ModelCenterActivity : ComponentActivity() {
 
         val status = TextView(this).apply {
             val engineSupportsFamily = runtimeReady && model.family in runtimeFamilies
-            text = when {
-                ModelCatalog.isInstalled(this@ModelCenterActivity, model) && engineSupportsFamily ->
-                    "文件校验通过 · 当前引擎包含此模型家族（尚待设备推理实测）"
-                ModelCatalog.isInstalled(this@ModelCenterActivity, model) ->
-                    "文件校验通过 · 当前 Android 引擎未编入此模型家族"
-                engineSupportsFamily ->
-                    "尚未下载 · 当前引擎包含此模型家族"
-                else -> "尚未下载 · 当前引擎尚未编入此模型家族"
-            }
+            text = "正在检查本地模型文件及 SHA-256…"
             textSize = 12f
             setTextColor(accentColor)
             setPadding(0, dp(7), 0, dp(3))
@@ -280,7 +274,9 @@ class ModelCenterActivity : ComponentActivity() {
         }
         val uniqueName = "model-download-${model.id}"
         var state: WorkInfo.State? = null
-        var installed = ModelCatalog.isInstalled(this, model)
+        var installed = false
+        var latestInfo: WorkInfo? = null
+        var verifiedForSucceeded = false
 
         fun update(info: WorkInfo?) {
             if (!downloadable) {
@@ -289,8 +285,8 @@ class ModelCenterActivity : ComponentActivity() {
                 action.isEnabled = false
                 return
             }
+            latestInfo = info
             state = info?.state
-            installed = ModelCatalog.isInstalled(this, model)
             when (info?.state) {
                 WorkInfo.State.RUNNING, WorkInfo.State.ENQUEUED, WorkInfo.State.BLOCKED -> {
                     val done = info.progress.getLong("downloaded", 0L)
@@ -322,9 +318,29 @@ class ModelCenterActivity : ComponentActivity() {
             }
         }
 
-        workManager.getWorkInfosForUniqueWorkLiveData(uniqueName).observe(this) { infos ->
-            update(infos.firstOrNull())
+        fun refreshInstalled() {
+            modelCheckExecutor.execute {
+                val verified = runCatching { ModelCatalog.isInstalled(this@ModelCenterActivity, model) }.getOrDefault(false)
+                runOnUiThread {
+                    if (!isFinishing) {
+                        installed = verified
+                        update(latestInfo)
+                    }
+                }
+            }
         }
+
+        workManager.getWorkInfosForUniqueWorkLiveData(uniqueName).observe(this) { infos ->
+            val info = infos.firstOrNull()
+            update(info)
+            if (info?.state == WorkInfo.State.SUCCEEDED && !verifiedForSucceeded) {
+                verifiedForSucceeded = true
+                refreshInstalled()
+            } else if (info?.state != WorkInfo.State.SUCCEEDED) {
+                verifiedForSucceeded = false
+            }
+        }
+        refreshInstalled()
         action.setOnClickListener {
             if (!downloadable) return@setOnClickListener
             when (state) {
@@ -336,7 +352,9 @@ class ModelCenterActivity : ComponentActivity() {
                     if (installed) Toast.makeText(this, if (runtimeReady && model.family in runtimeFamilies) "模型文件已校验；该家族已编入引擎，仍需设备实测" else "模型文件已校验，但当前引擎尚未编入该模型家族", Toast.LENGTH_LONG).show()
                     else enqueue(model, uniqueName)
                 }
-                else -> enqueue(model, uniqueName)
+                else -> if (installed) {
+                    Toast.makeText(this, "模型文件已通过校验", Toast.LENGTH_SHORT).show()
+                } else enqueue(model, uniqueName)
             }
         }
         return card
