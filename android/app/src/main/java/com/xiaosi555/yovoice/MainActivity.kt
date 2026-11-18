@@ -292,6 +292,18 @@ class MainActivity : Activity() {
         body.addView(label("最近项目", 17, p.text, true), marginTop(24))
         body.addView(infoRow("中文旁白试听", "手机系统语音引擎"), marginTop(8))
         body.addView(infoRow("本地音频导入", "支持通过文件选择器载入音频"), marginTop(8))
+
+        // The TTS provider may finish initialization while the creation home is visible.
+        // Rebind the live engine state whenever the TTS workspace is opened.
+        if (activeTtsEngineId.isNotBlank()) enginePicker.text = activeTtsEngineLabel + "   ›"
+        when {
+            activeTtsEngineId == "native:audio8" -> status.text = "已选择 Audio8 本地引擎；使用前请确认模型已下载并校验。"
+            ttsReady -> {
+                status.text = activeTtsEngineLabel + " 已就绪，可以试听。"
+                refreshSystemVoices()
+            }
+            else -> status.text = "正在初始化或等待选择系统语音服务…"
+        }
     }
 
     private fun renderCreate() {
