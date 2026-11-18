@@ -2031,8 +2031,8 @@ class MainActivity : AppCompatActivity() {
                                     refreshSystemVoices()
                                     val localCount = imported.speakers.count { it.hasLocalData }
                                     if (::status.isInitialized) status.text =
-                                        "已导入 ${imported.engineName} · ${imported.speakers.size} 个音色 · 匹配到 $localCount 个本地 .voc.dat 文件"
-                                    Toast.makeText(this, "MultiTTS 音色名称索引已建立", Toast.LENGTH_LONG).show()
+                                        "已导入 ${imported.engineName} · ${imported.speakers.size} 个音色 · 匹配到 $localCount 个本地 DAT 文件（仅完成索引）"
+                                    Toast.makeText(this, "MultiTTS 音色索引已建立；DAT 引擎加载尚未验证", Toast.LENGTH_LONG).show()
                                 }
                             }
                         } catch (error: Throwable) {
@@ -2779,7 +2779,7 @@ class MainActivity : AppCompatActivity() {
                 val detail = mapped?.let { speaker ->
                     listOfNotNull(
                         speaker.description.takeIf { it.isNotBlank() },
-                        if (speaker.hasLocalData) "已匹配本地音色资源" else null,
+                        if (speaker.hasLocalData) "包内存在对应 DAT 文件（引擎加载待验证）" else null,
                         if (voice.isNetworkConnectionRequired) "需要网络" else "离线可用"
                     ).joinToString(" · ")
                 } ?: "${voice.locale.toLanguageTag()} · " +
