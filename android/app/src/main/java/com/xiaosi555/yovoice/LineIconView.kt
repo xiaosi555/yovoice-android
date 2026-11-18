@@ -11,7 +11,7 @@ class LineIconView(context: Context, private val kind: String, private val tint:
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = tint
         style = Paint.Style.STROKE
-        strokeWidth = resources.displayMetrics.density * 1.8f
+        strokeWidth = resources.displayMetrics.density * 1.35f
         strokeCap = Paint.Cap.ROUND
         strokeJoin = Paint.Join.ROUND
     }

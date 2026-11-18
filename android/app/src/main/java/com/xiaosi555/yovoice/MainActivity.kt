@@ -15,6 +15,9 @@ import android.os.Bundle
 import android.os.SystemClock
 import android.content.res.Configuration
 import android.speech.tts.TextToSpeech
+import android.speech.tts.UtteranceProgressListener
+import android.text.Editable
+import android.text.TextWatcher
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
@@ -79,7 +82,8 @@ class MainActivity : AppCompatActivity() {
     private var availableTtsVoices: List<android.speech.tts.Voice> = emptyList()
     private var speechRate = 1.0f
     private var speechPitch = 1.0f
-    private lateinit var voicePicker: Spinner
+    private lateinit var voicePicker: TextView
+    private var multiTtsPackage: MultiTtsPackageImporter.ImportedPackage? = null
     private lateinit var enginePicker: TextView
     private lateinit var speedLabel: TextView
     private lateinit var pitchLabel: TextView
@@ -337,22 +341,20 @@ class MainActivity : AppCompatActivity() {
         panel.addView(enginePicker, LinearLayout.LayoutParams(-1, dp(48)).apply { topMargin = dp(10) })
 
         panel.addView(label("音色", 13, p.secondary, true), marginTop(12))
-        voicePicker = Spinner(this).apply {
-            adapter = ArrayAdapter(this@MainActivity, android.R.layout.simple_spinner_dropdown_item, listOf("正在读取系统音色…"))
-            onItemSelectedListener = object : android.widget.AdapterView.OnItemSelectedListener {
-                override fun onNothingSelected(parent: android.widget.AdapterView<*>?) {}
-                override fun onItemSelected(parent: android.widget.AdapterView<*>?, view: View?, position: Int, id: Long) {
-                    val voice = availableTtsVoices.getOrNull(position)
-                    selectedVoiceName = voice?.name
-                    voice?.let {
-                        getSharedPreferences("yovoice-tts", MODE_PRIVATE).edit()
-                            .putString("voice:" + activeTtsEngineId, it.name).apply()
-                        runCatching { tts?.voice = it }
-                    }
-                }
-            }
+        voicePicker = TextView(this).apply {
+            text = "搜索并选择音色"
+            textSize = 14f
+            setTextColor(p.text)
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(13), 0, dp(13), 0)
+            background = shape(p.bg, dp(13), p.border, dp(1))
+            isClickable = true
+            isFocusable = true
+            contentDescription = "搜索并选择中文音色"
+            setOnClickListener { showVoiceSearchDialog() }
         }
-        panel.addView(voicePicker, marginTop(4))
+        panel.addView(voicePicker, LinearLayout.LayoutParams(-1, dp(48)).apply { topMargin = dp(4) })
+        panel.addView(secondaryButton("导入 MultiTTS 音色包（ZIP）") { chooseMultiTtsPackage() }, marginTop(7))
         speedLabel = label("语速 1.0×", 13, p.secondary)
         panel.addView(speedLabel, marginTop(10))
         speedSeekBar = SeekBar(this).apply {
@@ -402,7 +404,7 @@ class MainActivity : AppCompatActivity() {
         }
         panel.addView(pitchSeekBar, marginTop(2))
 
-        panel.addView(primaryButton("试听朗读（手机 TTS）") { speak() }, marginTop(10))
+        panel.addView(primaryButton("合成并试听（当前引擎）") { speak() }, marginTop(10))
         panel.addView(secondaryButton("释放本地模型内存") { unloadLocalModel() }, marginTop(8))
         body.addView(panel, marginTop(18))
         addFeatureModelSelector("tts", body)
@@ -1790,6 +1792,7 @@ class MainActivity : AppCompatActivity() {
     private var activeTtsEngineLabel = "正在发现语音引擎…"
 
     private fun initializeSystemTts() {
+        multiTtsPackage = MultiTtsPackageImporter.load(this)
         val prefs = getSharedPreferences("yovoice-tts", MODE_PRIVATE)
         if (prefs.getString("selected_tts_engine_id", null) == "native:audio8") {
             activeTtsEngineId = "native:audio8"
@@ -1858,16 +1861,25 @@ class MainActivity : AppCompatActivity() {
 
     private fun showTtsOptions() {
         val providers = TtsProviderRegistry.discover(this)
-        val labels = providers.map {
-            it.label + if (it.packageName == activeTtsEngineId) " ✓" else ""
-        }
-        val audio8Label = if (activeTtsEngineId == "native:audio8") "Audio8 本地引擎 ✓" else "Audio8 本地引擎"
-        val choices = labels + listOf(audio8Label, "打开手机文字转语音设置", "安装语音数据")
+        val defaultPackage = runCatching {
+            android.provider.Settings.Secure.getString(contentResolver, "tts_default_synth")
+        }.getOrNull()
+        val defaultProvider = providers.firstOrNull { it.packageName == defaultPackage }
+        val otherProviders = providers.filterNot { it.packageName == defaultPackage }
+        val choices = mutableListOf<String>()
+        if (defaultProvider != null) choices += "手机自带 / 系统默认 · ${defaultProvider.label}" +
+            if (defaultProvider.packageName == activeTtsEngineId) " ✓" else ""
+        otherProviders.forEach { choices += it.label + if (it.packageName == activeTtsEngineId) " ✓" else "" }
+        choices += if (activeTtsEngineId == "native:audio8") "Audio8 本地引擎 ✓" else "Audio8 本地引擎"
+        choices += "打开手机文字转语音设置"
+        choices += "安装语音数据"
         android.app.AlertDialog.Builder(this).setTitle("选择语音引擎")
             .setItems(choices.toTypedArray()) { _, which ->
+                val defaultCount = if (defaultProvider != null) 1 else 0
                 when {
-                    which < providers.size -> activateTtsProvider(providers[which])
-                    which == providers.size -> {
+                    defaultProvider != null && which == 0 -> activateTtsProvider(defaultProvider)
+                    which < defaultCount + otherProviders.size -> activateTtsProvider(otherProviders[which - defaultCount])
+                    which == defaultCount + otherProviders.size -> {
                         ++ttsGeneration
                         runCatching { tts?.stop() }
                         runCatching { tts?.shutdown() }
@@ -1886,9 +1898,10 @@ class MainActivity : AppCompatActivity() {
                         getSharedPreferences("yovoice-tts", MODE_PRIVATE).edit()
                             .putString("selected_tts_engine_id", activeTtsEngineId).apply()
                         if (::enginePicker.isInitialized) enginePicker.text = activeTtsEngineLabel + "   ›"
+                        if (::voicePicker.isInitialized) voicePicker.text = "Audio8 使用模型内置音色"
                         if (::status.isInitialized) status.text = "已选择 Audio8；使用前需要下载并校验对应模型。"
                     }
-                    which == providers.size + 1 -> launchTtsSettings()
+                    which == defaultCount + otherProviders.size + 1 -> launchTtsSettings()
                     else -> try {
                         startActivity(Intent(TextToSpeech.Engine.ACTION_INSTALL_TTS_DATA))
                     } catch (_: ActivityNotFoundException) {
@@ -1914,7 +1927,7 @@ class MainActivity : AppCompatActivity() {
     private fun speak() {
         if (activeTtsEngineId.startsWith("native:")) { speakWithLocalModel(); return }
         val text = input.text?.toString()?.trim().orEmpty()
-        if (text.isBlank()) { Toast.makeText(this, "请先输入要朗读的文字", Toast.LENGTH_SHORT).show(); return }
+        if (text.isBlank()) { Toast.makeText(this, "请先输入要合成的文字", Toast.LENGTH_SHORT).show(); return }
         val engine = tts
         if (!ttsReady || engine == null) {
             Toast.makeText(this, "系统 TTS 尚未就绪。请先选择语音引擎或安装中文语音数据。", Toast.LENGTH_LONG).show()
@@ -1922,7 +1935,7 @@ class MainActivity : AppCompatActivity() {
             return
         }
         val language = runCatching { engine.setLanguage(Locale.SIMPLIFIED_CHINESE) }.getOrDefault(TextToSpeech.ERROR)
-        if (language == TextToSpeech.LANG_MISSING_DATA || language == TextToSpeech.LANG_NOT_SUPPORTED) {
+        if (language == TextToSpeech.LANG_MISSING_DATA || language == TextToSpeech.LANG_NOT_SUPPORTED || language == TextToSpeech.ERROR) {
             val fallback = runCatching { engine.setLanguage(Locale.getDefault()) }.getOrDefault(TextToSpeech.ERROR)
             if (fallback == TextToSpeech.LANG_MISSING_DATA || fallback == TextToSpeech.LANG_NOT_SUPPORTED || fallback == TextToSpeech.ERROR) {
                 Toast.makeText(this, "当前引擎没有可用的中文语音数据，请安装语音包或切换引擎。", Toast.LENGTH_LONG).show()
@@ -1931,9 +1944,58 @@ class MainActivity : AppCompatActivity() {
         }
         runCatching { engine.setSpeechRate(speechRate); engine.setPitch(speechPitch) }
         selectedVoiceName?.let { name -> engine.voices?.firstOrNull { it.name == name }?.let { voice -> runCatching { engine.voice = voice } } }
-        val result = runCatching { engine.speak(text, TextToSpeech.QUEUE_FLUSH, null, "yovoice-preview") }.getOrDefault(TextToSpeech.ERROR)
-        if (result == TextToSpeech.ERROR) Toast.makeText(this, "朗读请求失败，请切换系统 TTS 引擎。", Toast.LENGTH_LONG).show()
+        val projectDir = File(filesDir, "projects")
+        if (!projectDir.exists() && !projectDir.mkdirs()) {
+            Toast.makeText(this, "无法创建语音项目目录", Toast.LENGTH_LONG).show()
+            return
+        }
+        val output = File(projectDir, "system-tts-" + System.currentTimeMillis() + ".wav")
+        val utteranceId = "yovoice-system-${System.currentTimeMillis()}"
+        engine.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
+            override fun onStart(id: String?) {
+                runOnUiThread { if (!destroyed && ::status.isInitialized) status.text = "手机语音引擎正在合成…" }
+            }
+            override fun onDone(id: String?) {
+                runOnUiThread {
+                    if (destroyed || isFinishing) return@runOnUiThread
+                    if (!output.isFile || output.length() <= 44L) {
+                        if (::status.isInitialized) status.text = "手机语音引擎未生成有效音频文件。"
+                        return@runOnUiThread
+                    }
+                    pendingTtsSubtitleSrt = buildWholeAudioSubtitle(text, output)
+                    saveProjectRecord(activeTtsEngineLabel, "TTS", text.take(48), output, "audio/wav")
+                    if (::status.isInitialized) status.text = "语音合成完成 · ${output.length() / 1024} KB · $activeTtsEngineLabel"
+                    playAudio(Uri.fromFile(output))
+                }
+            }
+            override fun onError(id: String?) {
+                runOnUiThread {
+                    if (!destroyed && !isFinishing && ::status.isInitialized) {
+                        status.text = "手机语音引擎合成失败，请检查音色或切换引擎。"
+                    }
+                }
+            }
+        })
+        val result = runCatching {
+            engine.synthesizeToFile(text, Bundle(), output, utteranceId)
+        }.getOrDefault(TextToSpeech.ERROR)
+        if (result == TextToSpeech.ERROR) {
+            output.delete()
+            Toast.makeText(this, "当前系统 TTS 不支持文件合成或请求失败。", Toast.LENGTH_LONG).show()
+        } else if (::status.isInitialized) {
+            status.text = "已提交给 $activeTtsEngineLabel 合成…"
+        }
     }
+    private fun chooseMultiTtsPackage() {
+        val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+            addCategory(Intent.CATEGORY_OPENABLE)
+            type = "*/*"
+            putExtra(Intent.EXTRA_MIME_TYPES, arrayOf("application/zip", "application/x-zip-compressed", "application/octet-stream"))
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION)
+        }
+        startActivityForResult(intent, REQUEST_MULTITTS_PACKAGE)
+    }
+
     private fun chooseAudio() {
         val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply { addCategory(Intent.CATEGORY_OPENABLE); type = "audio/*" }
         startActivityForResult(intent, REQUEST_AUDIO)
@@ -1948,6 +2010,31 @@ class MainActivity : AppCompatActivity() {
                 REQUEST_AUDIO -> {
                     audioImportStatusView?.text = "已导入音频，正在准备播放。"
                     playAudio(uri)
+                }
+                REQUEST_MULTITTS_PACKAGE -> {
+                    if (::status.isInitialized) status.text = "正在读取 MultiTTS 音色包并建立名称映射…"
+                    storageExecutor.execute {
+                        try {
+                            val imported = MultiTtsPackageImporter.import(this, uri)
+                            runOnUiThread {
+                                if (!destroyed && !isFinishing) {
+                                    multiTtsPackage = imported
+                                    refreshSystemVoices()
+                                    val localCount = imported.speakers.count { it.hasLocalData }
+                                    if (::status.isInitialized) status.text =
+                                        "已导入 ${imported.engineName} · ${imported.speakers.size} 个音色 · 匹配到 $localCount 个本地 .voc.dat 文件"
+                                    Toast.makeText(this, "MultiTTS 音色名称索引已建立", Toast.LENGTH_LONG).show()
+                                }
+                            }
+                        } catch (error: Throwable) {
+                            runOnUiThread {
+                                if (!destroyed && !isFinishing) {
+                                    if (::status.isInitialized) status.text = "音色包导入失败：${error.localizedMessage ?: error.javaClass.simpleName}"
+                                    Toast.makeText(this, "无法读取 MultiTTS 音色包", Toast.LENGTH_LONG).show()
+                                }
+                            }
+                        }
+                    }
                 }
                 REQUEST_ASR_MEDIA -> transcribeMedia(uri)
                 REQUEST_CLONE_REFERENCE -> {
@@ -2617,19 +2704,111 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    private fun voiceDisplayName(voice: android.speech.tts.Voice, index: Int): String {
+        val mapped = multiTtsPackage?.speakers?.firstOrNull {
+            it.code.equals(voice.name, true) || voice.name.contains(it.code, true)
+        }
+        if (mapped != null) return mapped.name
+        val language = voice.locale.getDisplayLanguage(Locale.SIMPLIFIED_CHINESE).ifBlank { "未知语言" }
+        val country = voice.locale.getDisplayCountry(Locale.SIMPLIFIED_CHINESE)
+        val localeLabel = when {
+            voice.locale.language.equals("zh", true) && voice.locale.country.equals("CN", true) -> "中文普通话"
+            voice.locale.language.equals("zh", true) && country.isNotBlank() -> "中文$country"
+            else -> listOf(language, country).filter { it.isNotBlank() }.joinToString("")
+        }
+        val quality = if (voice.quality >= android.speech.tts.Voice.QUALITY_HIGH) "高品质" else "标准"
+        val connection = if (voice.isNetworkConnectionRequired) "网络" else "离线"
+        return "$localeLabel · 音色 ${index + 1} · $quality · $connection"
+    }
+
+    private fun showVoiceSearchDialog() {
+        val voices = availableTtsVoices
+        if (voices.isEmpty()) {
+            Toast.makeText(this, "当前引擎尚未提供可选音色，请先确认引擎已连接并安装中文语音数据。", Toast.LENGTH_LONG).show()
+            return
+        }
+        val container = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(18), dp(8), dp(18), dp(8))
+        }
+        val search = EditText(this).apply {
+            hint = "搜索中文名称、语言或音色特征"
+            textSize = 14f
+            setSingleLine(true)
+            setTextColor(p.text)
+            setHintTextColor(p.secondary)
+            background = shape(p.bg, dp(12), p.border, dp(1))
+            setPadding(dp(12), dp(10), dp(12), dp(10))
+        }
+        container.addView(search, LinearLayout.LayoutParams(-1, dp(46)))
+        val list = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        val scroll = ScrollView(this).apply { addView(list) }
+        container.addView(scroll, LinearLayout.LayoutParams(-1, dp(360)).apply { topMargin = dp(10) })
+        val dialog = AlertDialog.Builder(this)
+            .setTitle("选择音色")
+            .setView(container)
+            .setNegativeButton("关闭", null)
+            .create()
+
+        fun renderRows(query: String) {
+            list.removeAllViews()
+            val filtered = voices.withIndex().filter { (index, voice) ->
+                val mapped = multiTtsPackage?.speakers?.firstOrNull {
+                    it.code.equals(voice.name, true) || voice.name.contains(it.code, true)
+                }
+                val haystack = listOf(
+                    voiceDisplayName(voice, index), voice.name, voice.locale.toLanguageTag(),
+                    mapped?.description.orEmpty(), mapped?.descText.orEmpty()
+                ).joinToString(" ").lowercase(Locale.ROOT)
+                haystack.contains(query.trim().lowercase(Locale.ROOT))
+            }
+            filtered.forEach { (index, voice) ->
+                val mapped = multiTtsPackage?.speakers?.firstOrNull {
+                    it.code.equals(voice.name, true) || voice.name.contains(it.code, true)
+                }
+                val title = voiceDisplayName(voice, index)
+                val detail = mapped?.description?.takeIf { it.isNotBlank() }
+                    ?: "${voice.locale.toLanguageTag()} · " +
+                    if (voice.isNetworkConnectionRequired) "需要网络" else "离线可用"
+                val row = LinearLayout(this).apply {
+                    orientation = LinearLayout.VERTICAL
+                    setPadding(dp(12), dp(10), dp(12), dp(10))
+                    background = ripple(p.surface, dp(11), p.border)
+                    isClickable = true
+                    isFocusable = true
+                    addView(label(title, 14, p.text, true))
+                    addView(label(detail, 11, p.secondary).apply { maxLines = 2 }, marginTop(3))
+                    setOnClickListener {
+                        selectedVoiceName = voice.name
+                        getSharedPreferences("yovoice-tts", MODE_PRIVATE).edit()
+                            .putString("voice:" + activeTtsEngineId, voice.name).apply()
+                        val applied = runCatching { tts?.voice = voice }.isSuccess
+                        voicePicker.text = title
+                        if (!applied && ::status.isInitialized) status.text = "已选择音色，但当前引擎应用失败。"
+                        dialog.dismiss()
+                    }
+                }
+                list.addView(row, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(6) })
+            }
+            if (filtered.isEmpty()) list.addView(label("没有找到匹配的音色", 13, p.secondary).apply {
+                setPadding(dp(8), dp(18), dp(8), dp(18))
+            })
+        }
+        search.addTextChangedListener(object : TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit
+            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) = renderRows(s?.toString().orEmpty())
+            override fun afterTextChanged(s: Editable?) = Unit
+        })
+        renderRows("")
+        dialog.show()
+    }
+
     private fun refreshSystemVoices() {
         val voices = runCatching { tts?.voices.orEmpty()
             .sortedWith(compareBy({ !it.locale.language.equals("zh", true) }, { it.isNetworkConnectionRequired }, { it.name })) }.getOrDefault(emptyList())
         availableTtsVoices = voices
-        val names = voices.map { voice ->
-            val language = voice.locale.getDisplayLanguage(Locale.SIMPLIFIED_CHINESE)
-            val country = voice.locale.getDisplayCountry(Locale.SIMPLIFIED_CHINESE)
-            val quality = if (voice.quality >= android.speech.tts.Voice.QUALITY_HIGH) "高品质" else "标准"
-            "${voice.name} · $language $country · $quality"
-        }.ifEmpty { listOf("当前引擎未提供可选音色") }
-        val currentIndex = voices.indexOfFirst { it.name == selectedVoiceName }.let { if (it >= 0) it else 0 }
-        voicePicker.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, names)
         if (voices.isNotEmpty()) {
+            val currentIndex = voices.indexOfFirst { it.name == selectedVoiceName }.let { if (it >= 0) it else 0 }
             val selected = voices[currentIndex]
             selectedVoiceName = selected.name
             getSharedPreferences("yovoice-tts", MODE_PRIVATE).edit()
@@ -2639,10 +2818,12 @@ class MainActivity : AppCompatActivity() {
                 tts?.setSpeechRate(speechRate)
                 tts?.setPitch(speechPitch)
             }.isSuccess
-            voicePicker.setSelection(currentIndex)
+            if (::voicePicker.isInitialized) voicePicker.text = voiceDisplayName(selected, currentIndex)
             if (!applied && ::status.isInitialized) {
                 status.text = activeTtsEngineLabel + " 已连接，但应用音色或语音参数失败；可尝试其他音色。"
             }
+        } else if (::voicePicker.isInitialized) {
+            voicePicker.text = "当前引擎未提供可选音色"
         }
     }
     private fun releasePlayer() { runCatching { player?.stop() }; runCatching { player?.release() }; player = null }
@@ -2674,5 +2855,6 @@ class MainActivity : AppCompatActivity() {
         private const val REQUEST_EXPORT_MIDI = 4110
         private const val REQUEST_EXPORT_GENERIC = 4111
         private const val REQUEST_EXPORT_TTS_SRT = 4117
+        private const val REQUEST_MULTITTS_PACKAGE = 4118
     }
 }
