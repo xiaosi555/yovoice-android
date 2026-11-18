@@ -18,7 +18,9 @@ data class MultiTtsSpeaker(
     val description: String,
     val locale: String,
     val datPath: String?,
-    val descText: String?
+    val descText: String?,
+    /** MultiTTS publishes Speaker.id as Android Voice.name; code remains the asset key. */
+    val id: String = code
 ) {
     val hasLocalData: Boolean get() = !datPath.isNullOrBlank()
 }
@@ -132,7 +134,8 @@ object MultiTtsPackageImporter {
             MultiTtsSpeaker(
                 item.getString("engineCode"), item.getString("code"), item.getString("name"),
                 item.optString("description"), item.optString("locale"), item.optString("datPath").ifBlank { null },
-                item.optString("descText").ifBlank { null }
+                item.optString("descText").ifBlank { null },
+                item.optString("id").ifBlank { item.getString("code") }
             )
         }
         ImportedPackage(root.getString("uri"), root.optString("displayName"), storedSize, storedModified,
@@ -187,7 +190,8 @@ object MultiTtsPackageImporter {
                 .put("description", speaker.description)
                 .put("locale", speaker.locale)
                 .put("datPath", speaker.datPath ?: "")
-                .put("descText", speaker.descText ?: ""))
+                .put("descText", speaker.descText ?: "")
+                .put("id", speaker.id))
         }
         val json = JSONObject()
             .put("uri", value.uri)
@@ -247,7 +251,8 @@ object MultiTtsPackageImporter {
                     ?: dat?.let(::datBase)?.let { descTexts[it] }
                 result += MultiTtsSpeaker(
                     engineCode, code, name, fields["desc"].orEmpty(),
-                    fields["locale"].orEmpty(), dat, desc
+                    fields["locale"].orEmpty(), dat, desc,
+                    fields["id"].orEmpty().ifBlank { code }
                 )
             }
             fields = linkedMapOf()
