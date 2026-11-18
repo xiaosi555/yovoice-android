@@ -30,11 +30,14 @@ import androidx.work.WorkManager
 import androidx.work.workDataOf
 import java.util.concurrent.TimeUnit
 import java.util.Locale
+import org.json.JSONObject
 
 class ModelCenterActivity : ComponentActivity() {
     private lateinit var workManager: WorkManager
     private lateinit var sourcePicker: Spinner
     private val downloadStates = mutableMapOf<String, WorkInfo.State?>()
+    @Volatile private var runtimeFamilies: Set<String> = emptySet()
+    @Volatile private var runtimeReady: Boolean = false
     private val themeIndex by lazy { getSharedPreferences("yovoice-ui", MODE_PRIVATE).getInt("theme", 0).coerceIn(0, 5) }
     private val pageBg get() = intArrayOf(0xFFF7F7F7.toInt(),0xFF0F0F11.toInt(),0xFFF1F6F6.toInt(),0xFFF3EEE4.toInt(),0xFFEFF3ED.toInt(),0xFF04181A.toInt())[themeIndex]
     private val surface get() = intArrayOf(0xFFFFFFFF.toInt(),0xFF18181B.toInt(),0xFFFFFFFF.toInt(),0xFFFBF8F1.toInt(),0xFFFFFFFF.toInt(),0xFF082427.toInt())[themeIndex]
@@ -46,7 +49,27 @@ class ModelCenterActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         try {
             workManager = WorkManager.getInstance(applicationContext)
-            buildPage()
+            setContentView(TextView(this).apply {
+                text = "正在检查 Android 本地推理引擎…"
+                textSize = 15f
+                setTextColor(primaryText)
+                gravity = Gravity.CENTER
+            })
+            Thread {
+                val probe = runCatching { JSONObject(NativeEngine.probe()) }.getOrNull()
+                val ready = probe?.optString("status") == "ready"
+                val families = probe?.optJSONArray("families")
+                val detected = if (families == null) emptySet() else {
+                    (0 until families.length()).map { families.optString(it) }.filter { it.isNotBlank() }.toSet()
+                }
+                runOnUiThread {
+                    if (!isFinishing && !isDestroyed) {
+                        runtimeReady = ready
+                        runtimeFamilies = detected
+                        buildPage()
+                    }
+                }
+            }.start()
         } catch (error: Throwable) {
             val fallback = TextView(this).apply {
                 text = "模型中心暂时无法打开\n\n${error.localizedMessage ?: error.javaClass.simpleName}\n\n请返回工作室重试。"
@@ -98,7 +121,11 @@ class ModelCenterActivity : ComponentActivity() {
         root.addView(sourcePicker, params())
 
         root.addView(TextView(this).apply {
-            text = "说明：下载完成会逐文件校验大小和 SHA-256，多文件模型全部通过后才会安装登记。当前 Android 推理库仍在构建验证，已下载不代表现在就能加载推理。大模型可能超过手机可用存储或运行内存。"
+            text = if (runtimeReady) {
+                "说明：下载完成会逐文件校验大小和 SHA-256。当前原生引擎实际编入的模型家族：${runtimeFamilies.joinToString().ifBlank { "暂无" }}。目录中的其他模型可以下载保存，但尚未编入本机推理库，不能视为可运行。大模型可能超过手机可用存储或运行内存。"
+            } else {
+                "说明：当前 Android 原生推理库尚未成功初始化。模型下载仍会校验文件，但在引擎可用前不能进行本地推理。大模型可能超过手机可用存储或运行内存。"
+            }
             textSize = 12f
             setTextColor(0xFF8A5B26.toInt())
             setPadding(dp(12), dp(10), dp(12), dp(10))
@@ -221,10 +248,15 @@ class ModelCenterActivity : ComponentActivity() {
         }, params())
 
         val status = TextView(this).apply {
-            text = if (ModelCatalog.isInstalled(this@ModelCenterActivity, model)) {
-                "已下载并通过文件校验 · 等待推理引擎接入"
-            } else {
-                "尚未下载"
+            val engineSupportsFamily = runtimeReady && model.family in runtimeFamilies
+            text = when {
+                ModelCatalog.isInstalled(this@ModelCenterActivity, model) && engineSupportsFamily ->
+                    "文件校验通过 · 当前引擎包含此模型家族（尚待设备推理实测）"
+                ModelCatalog.isInstalled(this@ModelCenterActivity, model) ->
+                    "文件校验通过 · 当前 Android 引擎未编入此模型家族"
+                engineSupportsFamily ->
+                    "尚未下载 · 当前引擎包含此模型家族"
+                else -> "尚未下载 · 当前引擎尚未编入此模型家族"
             }
             textSize = 12f
             setTextColor(accentColor)
@@ -272,7 +304,7 @@ class ModelCenterActivity : ComponentActivity() {
                     action.text = "暂停下载"
                 }
                 WorkInfo.State.SUCCEEDED -> {
-                    status.text = if (installed) "已下载并通过 SHA-256 校验 · 等待推理引擎接入" else "安装文件缺失，请重新下载"
+                    status.text = if (installed && runtimeReady && model.family in runtimeFamilies) "文件校验通过 · 当前引擎包含此模型家族（尚待设备推理实测）" else if (installed) "文件校验通过 · 当前 Android 引擎未编入此模型家族" else "安装文件缺失，请重新下载"
                     action.text = if (installed) "已下载" else "重新下载"
                 }
                 WorkInfo.State.CANCELLED -> {
@@ -284,7 +316,7 @@ class ModelCenterActivity : ComponentActivity() {
                     action.text = "重试下载"
                 }
                 else -> {
-                    status.text = if (installed) "已下载并通过文件校验 · 等待推理引擎接入" else "尚未下载"
+                    status.text = if (installed && runtimeReady && model.family in runtimeFamilies) "文件校验通过 · 当前引擎包含此模型家族（尚待设备推理实测）" else if (installed) "文件校验通过 · 当前 Android 引擎未编入此模型家族" else "尚未下载"
                     action.text = if (installed) "已下载" else "下载模型"
                 }
             }
@@ -301,7 +333,7 @@ class ModelCenterActivity : ComponentActivity() {
                     Toast.makeText(this, "已请求暂停，保留下载断点", Toast.LENGTH_SHORT).show()
                 }
                 WorkInfo.State.SUCCEEDED -> {
-                    if (installed) Toast.makeText(this, "模型文件已校验；Android 推理引擎仍在接入", Toast.LENGTH_LONG).show()
+                    if (installed) Toast.makeText(this, if (runtimeReady && model.family in runtimeFamilies) "模型文件已校验；该家族已编入引擎，仍需设备实测" else "模型文件已校验，但当前引擎尚未编入该模型家族", Toast.LENGTH_LONG).show()
                     else enqueue(model, uniqueName)
                 }
                 else -> enqueue(model, uniqueName)
