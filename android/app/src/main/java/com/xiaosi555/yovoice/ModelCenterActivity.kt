@@ -46,7 +46,7 @@ class ModelCenterActivity : ComponentActivity() {
             buildPage()
         } catch (error: Throwable) {
             val fallback = TextView(this).apply {
-                text = "模型中心暂时无法打开\\n\\n${error.localizedMessage ?: error.javaClass.simpleName}\\n\\n请返回工作室重试。"
+                text = "模型中心暂时无法打开\n\n${error.localizedMessage ?: error.javaClass.simpleName}\n\n请返回工作室重试。"
                 textSize = 15f
                 setTextColor(primaryText)
                 setPadding(dp(24))
@@ -149,7 +149,7 @@ class ModelCenterActivity : ComponentActivity() {
         card.addView(TextView(this).apply {
             text = "${model.family} · ${model.version} · ${model.precision} · ${model.formattedSize()} · ${model.packageFiles().size} 个文件"
             textSize = 12f
-            setTextColor(0xFF68717D.toInt())
+            setTextColor(secondaryText)
             setPadding(0, dp(4), 0, dp(4))
         }, params())
         card.addView(TextView(this).apply {
