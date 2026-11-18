@@ -51,8 +51,15 @@ class ModelCenterActivity : ComponentActivity() {
     }
     private val baseBg get() = intArrayOf(0xFFF7F7F7.toInt(),0xFF0F0F11.toInt(),0xFFF1F6F6.toInt(),0xFFF3EEE4.toInt(),0xFFEFF3ED.toInt(),0xFF04181A.toInt())[themeIndex]
     private val baseSurface get() = intArrayOf(0xFFFFFFFF.toInt(),0xFF18181B.toInt(),0xFFFFFFFF.toInt(),0xFFFBF8F1.toInt(),0xFFFFFFFF.toInt(),0xFF082427.toInt())[themeIndex]
-    private val pageBg get() = if (paletteDark) mixColor(baseBg, android.graphics.Color.BLACK, 0.86f) else mixColor(baseBg, android.graphics.Color.WHITE, 0.10f)
-    private val surface get() = if (paletteDark) mixColor(baseSurface, android.graphics.Color.BLACK, 0.82f) else android.graphics.Color.WHITE
+    private val baseThemeDark get() = themeIndex == 1 || themeIndex == 5
+    private val pageBg get() = if (paletteDark) {
+        if (baseThemeDark) baseBg else mixColor(baseBg, android.graphics.Color.BLACK, 0.86f)
+    } else {
+        if (baseThemeDark) mixColor(baseBg, android.graphics.Color.WHITE, 0.94f) else baseBg
+    }
+    private val surface get() = if (paletteDark) {
+        if (baseThemeDark) baseSurface else mixColor(baseSurface, android.graphics.Color.BLACK, 0.82f)
+    } else android.graphics.Color.WHITE
     private val primaryText get() = if (paletteDark) 0xFFF1F3F4.toInt() else 0xFF202124.toInt()
     private val secondaryText get() = if (paletteDark) 0xFFADB5B8.toInt() else 0xFF6F7478.toInt()
     private val accentColor get() = intArrayOf(0xFF18181A.toInt(),0xFFEDEDEF.toInt(),0xFF0B7A80.toInt(),0xFF9A4A24.toInt(),0xFF3B6B4C.toInt(),0xFF19C3CD.toInt())[themeIndex].let {
