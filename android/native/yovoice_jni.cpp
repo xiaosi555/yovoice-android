@@ -279,8 +279,8 @@ Java_com_xiaosi555_yovoice_NativeEngine_nativeSynthesize(
     }
 
     std::lock_guard<std::mutex> lock(g_mutex);
-    if (g_state.session == nullptr) {
-        return make_string(env, failure_json("尚未加载语音模型"));
+    if (g_state.session == nullptr || g_state.task != "tts") {
+        return make_string(env, failure_json("尚未加载 TTS 语音模型"));
     }
 
     if (!std::isfinite(speaking_rate) || speaking_rate <= 0.0f ||
@@ -358,7 +358,7 @@ Java_com_xiaosi555_yovoice_NativeEngine_nativeTranscribe(
         return make_string(env, failure_json("音频数据或采样参数无效"));
     }
     const jsize sample_count = env->GetArrayLength(pcm_array);
-    if (sample_count <= 0 || sample_count > 120000000) {
+    if (sample_count <= 0 || sample_count > 120000000 || sample_count % channels != 0) {
         return make_string(env, failure_json("音频长度无效或超过 Android 单次推理上限"));
     }
     jfloat* samples = env->GetFloatArrayElements(pcm_array, nullptr);
