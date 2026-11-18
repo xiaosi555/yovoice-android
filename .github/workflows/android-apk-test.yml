@@ -1,12 +1,8 @@
 name: Android Debug APK (ARM64 测试包)
 
 on:
+  # Run only when explicitly requested after source validation and feature completion.
   workflow_dispatch:
-  push:
-    branches: [main]
-    paths:
-      - "android/**"
-      - ".github/workflows/android-apk-test.yml"
 
 permissions:
   contents: read
