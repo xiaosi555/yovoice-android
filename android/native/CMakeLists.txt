@@ -13,10 +13,10 @@ set(AUDIOCPP_BUILD_NATIVE_MODEL_MANAGER OFF CACHE BOOL "" FORCE)
 # 只编译 Yovoice 模型目录实际使用的模型族，避免把上游 140+ 个无关模型都塞入 APK。
 # Gradium Phonon、HTDemucs 6-stem 与 BS-RoFormer 使用 audio.cpp 对应的官方别名。
 set(AUDIOCPP_MODEL_SET custom CACHE STRING "" FORCE)
-# Android 当前编译 Audio8 TTS 与 Qwen3 ASR；Qwen3 ASR 的强制对齐器依赖由
-# audio.cpp CMake 模型依赖图自动加入。其他模型仅保留目录入口，逐族验证后再加入。
+# Android 编译语音合成/克隆、ASR、六轨分离、音频转 MIDI 与文本音乐生成模型族。
+# qwen3_asr 的强制对齐器依赖由 audio.cpp CMake 模型依赖图自动加入。
 set(AUDIOCPP_MODELS
-    "audio8_tts;qwen3_asr"
+    "audio8_tts;qwen3_asr;demucs;muscriptor;stable_audio"
     CACHE STRING "" FORCE)
 
 # Android 首轮只构建 ARM64 CPU 后端；关闭桌面 GPU、OpenMP 与宿主机 ISA 探测。
