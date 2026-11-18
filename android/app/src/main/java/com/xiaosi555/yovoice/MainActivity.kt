@@ -261,7 +261,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         body.addView(label("语音引擎", 17, p.text, true), marginTop(24))
         body.addView(infoRow("手机系统 TTS", if (ttsReady) "已就绪" else "未就绪或正在检测"), marginTop(8))
         body.addView(secondaryButton("选择语音引擎 / 打开系统语音设置") { showTtsOptions() }, marginTop(8))
-        body.addView(infoRow("Android 本地推理引擎", "Audio8 TTS 首个适配目标"), marginTop(8))
+        body.addView(infoRow("Android 本地推理引擎", "Audio8 TTS · Qwen3 ASR 0.6B"), marginTop(8))
         body.addView(label("主题名称与颜色沿用 Yovoice 桌面版主题体系；移动端针对单手操作重新排布。", 12, p.secondary), marginTop(18))
     }
 
@@ -515,7 +515,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         }
         val model = runCatching { ModelCatalog.load(this).firstOrNull { it.id == "qwen3-asr-0.6b-q8" } }.getOrNull()
         if (model == null || !ModelCatalog.isInstalled(this, model)) {
-            Toast.makeText(this, "请先在模型中心下载 Qwen3 ASR 0.6B 模型包", Toast.LENGTH_LONG).show()
+            Toast.makeText(this, "请先在模型中心下载 Qwen3 ASR 0.6B 模型包（约 2.28 GB，含识别模型与对齐器文件）", Toast.LENGTH_LONG).show()
             page = 2
             render()
             return
