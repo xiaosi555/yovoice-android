@@ -55,6 +55,8 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     private var asrStatusView: TextView? = null
     private var asrResultView: TextView? = null
     private var pendingTextExport: String = ""
+    private var pendingSubtitleSrt: String = ""
+    private var pendingSubtitleVtt: String = ""
     private lateinit var cloneTextInput: EditText
     private lateinit var cloneReferenceTextInput: EditText
     private var cloneReferenceUri: Uri? = null
@@ -268,6 +270,8 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         }
         body.addView(asrResultView, marginTop(8))
         body.addView(secondaryButton("导出识别文本 TXT") { exportTranscript() }, marginTop(8))
+        body.addView(secondaryButton("导出 SRT 字幕") { exportSubtitle(false) }, marginTop(6))
+        body.addView(secondaryButton("导出 WebVTT 字幕") { exportSubtitle(true) }, marginTop(6))
         val musicPanel = card()
         musicPanel.addView(section("AI 音乐生成", "Stable Audio 3 Small · 根据文字描述生成音乐"))
         musicPromptInput = EditText(this).apply {
@@ -591,6 +595,8 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                         ?: error("无法创建导出文件")
                 }.onSuccess { Toast.makeText(this, "识别文本已导出", Toast.LENGTH_SHORT).show() }
                     .onFailure { Toast.makeText(this, "导出失败：" + (it.localizedMessage ?: "未知错误"), Toast.LENGTH_LONG).show() }
+                REQUEST_EXPORT_SRT -> writeTextExport(uri, pendingSubtitleSrt, "SRT 字幕已导出")
+                REQUEST_EXPORT_VTT -> writeTextExport(uri, pendingSubtitleVtt, "WebVTT 字幕已导出")
                 REQUEST_EXPORT_CLONE -> copyExport(uri, pendingCloneExport, "克隆语音已导出")
                 REQUEST_EXPORT_MUSIC -> copyExport(uri, pendingMusicExport, "生成音乐已导出")
                 REQUEST_EXPORT_MIDI -> copyExport(uri, pendingMidiExport, "MIDI 文件已导出")
@@ -655,7 +661,13 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                 val modelRoot = ModelCatalog.installedDirectory(this, model.id)
                 val modelFile = File(modelRoot, model.localRelativePath(model.remotePath))
                 check(modelFile.isFile) { "ASR 模型文件不存在，请重新下载模型" }
-                val loaded = JSONObject(NativeEngine.loadTaskModel(modelFile.absolutePath, model.family, "asr", "offline"))
+                val alignerAsset = model.packageFiles().firstOrNull { it.path.contains("ForcedAligner", ignoreCase = true) }
+                    ?: error("ASR 模型包缺少 Qwen3 Forced Aligner 文件")
+                val alignerFile = File(modelRoot, model.localRelativePath(alignerAsset.path))
+                check(alignerFile.isFile) { "强制对齐器文件不存在，请重新下载完整 ASR 模型包" }
+                val loaded = JSONObject(NativeEngine.loadTaskModel(
+                    modelFile.absolutePath, model.family, "asr", "offline", auxiliaryPath = alignerFile.absolutePath
+                ))
                 check(loaded.optBoolean("ok")) { loaded.optString("error", "ASR 模型加载失败") }
                 runOnUiThread {
                     if (!destroyed && !isFinishing) asrStatusView?.text = "模型已加载，正在识别音频…"
@@ -665,10 +677,13 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                 val transcript = result.optString("text").trim()
                 check(transcript.isNotBlank()) { "模型没有返回识别文本" }
                 pendingTextExport = transcript
+                val segments = result.optJSONArray("segments") ?: org.json.JSONArray()
+                pendingSubtitleSrt = buildSubtitles(segments, result.optInt("sampleRate", 16_000), false)
+                pendingSubtitleVtt = buildSubtitles(segments, result.optInt("sampleRate", 16_000), true)
                 runOnUiThread {
                     if (!destroyed && !isFinishing) {
                         asrResultView?.text = transcript
-                        asrStatusView?.text = "本地识别完成 · Qwen3 ASR 0.6B · " + transcript.length + " 字"
+                        asrStatusView?.text = "本地识别完成 · Qwen3 ASR 0.6B · " + transcript.length + " 字 · " + segments.length() + " 个时间戳片段"
                         Toast.makeText(this, "语音识别完成", Toast.LENGTH_SHORT).show()
                     }
                 }
@@ -971,6 +986,87 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             .onFailure { Toast.makeText(this, "导出失败：" + (it.localizedMessage ?: "未知错误"), Toast.LENGTH_LONG).show() }
     }
 
+    private fun exportSubtitle(webVtt: Boolean) {
+        val content = if (webVtt) pendingSubtitleVtt else pendingSubtitleSrt
+        if (content.isBlank()) {
+            Toast.makeText(this, "当前识别结果没有可用的时间戳，请确认模型包中的强制对齐器已安装", Toast.LENGTH_LONG).show()
+            return
+        }
+        val intent = Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
+            addCategory(Intent.CATEGORY_OPENABLE)
+            type = if (webVtt) "text/vtt" else "application/x-subrip"
+            putExtra(Intent.EXTRA_TITLE, if (webVtt) "yovoice-subtitles.vtt" else "yovoice-subtitles.srt")
+        }
+        startActivityForResult(intent, if (webVtt) REQUEST_EXPORT_VTT else REQUEST_EXPORT_SRT)
+    }
+
+    private fun writeTextExport(uri: Uri, content: String, success: String) {
+        runCatching {
+            check(content.isNotBlank()) { "没有可导出的字幕内容" }
+            contentResolver.openOutputStream(uri)?.bufferedWriter(Charsets.UTF_8)?.use { it.write(content) }
+                ?: error("无法创建字幕文件")
+        }.onSuccess { Toast.makeText(this, success, Toast.LENGTH_SHORT).show() }
+            .onFailure { Toast.makeText(this, "字幕导出失败：" + (it.localizedMessage ?: "未知错误"), Toast.LENGTH_LONG).show() }
+    }
+
+    private fun buildSubtitles(segments: org.json.JSONArray, sampleRate: Int, webVtt: Boolean): String {
+        if (sampleRate <= 0 || segments.length() == 0) return ""
+        val groups = mutableListOf<List<org.json.JSONObject>>()
+        val current = mutableListOf<org.json.JSONObject>()
+        fun flush() {
+            if (current.isNotEmpty()) {
+                groups.add(current.toList())
+                current.clear()
+            }
+        }
+        for (index in 0 until segments.length()) {
+            val word = segments.optJSONObject(index) ?: continue
+            val text = word.optString("text").trim()
+            val start = word.optLong("startSample", -1L)
+            val end = word.optLong("endSample", -1L)
+            if (text.isEmpty() || start < 0L || end <= start) continue
+            if (current.isNotEmpty()) {
+                val firstStart = current.first().optLong("startSample")
+                val elapsed = (end - firstStart).toDouble() / sampleRate
+                if (current.size >= 6 || elapsed >= 3.5) flush()
+            }
+            current.add(word)
+            if (text.matches(Regex(".*[.!?。！？]$"))) flush()
+        }
+        flush()
+        if (groups.isEmpty()) return ""
+        val out = StringBuilder()
+        if (webVtt) out.append("WEBVTT\n\n")
+        groups.forEachIndexed { index, group ->
+            val start = group.first().optLong("startSample")
+            val end = group.last().optLong("endSample")
+            val parts = group.map { it.optString("text").trim() }
+            val cjk = parts.any { part -> part.any { it in '\u4e00'..'\u9fff' } }
+            val line = parts.joinToString(if (cjk) "" else " ")
+            if (webVtt) {
+                out.append(formatSubtitleTime(start, sampleRate, true)).append(" --> ")
+                    .append(formatSubtitleTime(end, sampleRate, true)).append('\n')
+                out.append(line).append("\n\n")
+            } else {
+                out.append(index + 1).append('\n')
+                out.append(formatSubtitleTime(start, sampleRate, false)).append(" --> ")
+                    .append(formatSubtitleTime(end, sampleRate, false)).append('\n')
+                out.append(line).append("\n\n")
+            }
+        }
+        return out.toString()
+    }
+
+    private fun formatSubtitleTime(samples: Long, sampleRate: Int, webVtt: Boolean): String {
+        val millis = (samples.coerceAtLeast(0L) * 1000L / sampleRate).coerceAtLeast(0L)
+        val hours = millis / 3_600_000L
+        val minutes = (millis / 60_000L) % 60L
+        val seconds = (millis / 1000L) % 60L
+        val fraction = millis % 1000L
+        val separator = if (webVtt) "." else ","
+        return String.format(java.util.Locale.US, "%02d:%02d:%02d%s%03d", hours, minutes, seconds, separator, fraction)
+    }
+
     private fun playAudio(uri: Uri) {
         releasePlayer()
         try {
@@ -1030,6 +1126,8 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         private const val REQUEST_AUDIO = 4102
         private const val REQUEST_ASR_MEDIA = 4103
         private const val REQUEST_EXPORT_TXT = 4104
+        private const val REQUEST_EXPORT_SRT = 4112
+        private const val REQUEST_EXPORT_VTT = 4113
         private const val REQUEST_CLONE_REFERENCE = 4105
         private const val REQUEST_EXPORT_CLONE = 4106
         private const val REQUEST_STEM_MEDIA = 4107
