@@ -31,6 +31,25 @@ class ModelEntryTest {
     )
 
     @Test
+    fun singleFilePackageIsDownloadableOnlyWithTrustedChecksum() {
+        assertTrue(model().isDownloadable())
+        val missingChecksum = model().copy(sha256 = "")
+        assertEquals(false, missingChecksum.isDownloadable())
+        val malformedChecksum = model().copy(sha256 = "not-a-checksum")
+        assertEquals(false, malformedChecksum.isDownloadable())
+    }
+
+    @Test
+    fun everyFileInMultiFilePackageMustHaveChecksumAndSize() {
+        val valid = ModelAssetFile("main.gguf", 100L, "a".repeat(64), null, null)
+        val missingHash = ModelAssetFile("config.json", 20L, "", null, null)
+        assertTrue(model(files = listOf(valid)).isDownloadable())
+        assertEquals(false, model(files = listOf(valid, missingHash)).isDownloadable())
+        val zeroSize = ModelAssetFile("empty.bin", 0L, "b".repeat(64), null, null)
+        assertEquals(false, model(files = listOf(zeroSize)).isDownloadable())
+    }
+
+    @Test
     fun singleFilePackageUsesCatalogMainFile() {
         val model = model()
         assertEquals(1, model.packageFiles().size)
