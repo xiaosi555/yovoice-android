@@ -50,6 +50,18 @@ object NativeEngine {
     /**
      * PCM 必须是交错 float32，建议 16 kHz 单声道；音频解码/重采样由 Android 层负责。
      */
+    fun cloneVoice(
+        text: String,
+        referenceText: String,
+        referencePcm: FloatArray,
+        sampleRate: Int,
+        channels: Int,
+        outputPath: String
+    ): String = runCatching {
+        ensureLoaded()
+        nativeClone(text, referenceText, referencePcm, sampleRate, channels, outputPath)
+    }.getOrElse { errorJson(it) }
+
     fun transcribe(
         pcm: FloatArray,
         sampleRate: Int = 16_000,
@@ -78,5 +90,6 @@ object NativeEngine {
     private external fun nativeLoadModel(path: String, family: String, task: String, mode: String, threads: Int): String
     private external fun nativeSynthesize(text: String, language: String, outputPath: String, speakingRate: Float, pitchMultiplier: Float): String
     private external fun nativeTranscribe(pcm: FloatArray, sampleRate: Int, channels: Int, language: String): String
+    private external fun nativeClone(text: String, referenceText: String, referencePcm: FloatArray, sampleRate: Int, channels: Int, outputPath: String): String
     private external fun nativeUnload()
 }
