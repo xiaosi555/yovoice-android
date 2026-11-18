@@ -114,3 +114,33 @@
 - TTS 详情页：引擎选择行与模型依赖行分开。模型行只显示当前模型、下载/校验状态和右侧图标，不能挤占文本编辑、音色和主操作区域。
 - 创作页面中模型相关内容的默认可见纵向面积原则上不超过首屏可用高度的 8%；模型中心专页不受此比例限制。
 - 模型推荐列表只在用户点击“更换模型/管理模型”后显示，不在工具详情页默认展开。
+
+## 8. Embedded model selection and Android navigation update (2026-11-19)
+
+### Tool-first workflow
+- Opening a creation tile enters the actual working screen immediately; model selection is optional and happens in that screen.
+- Every model-backed tool has one compact model row near the bottom of its working screen. The row shows the selected model and truthful state.
+- Tapping the row opens an in-context recommendation dialog. It lists models mapped to the current feature, prioritizes model families reported by the installed native runtime, and exposes download / pause / retry / verification actions without leaving the tool.
+- A “更多模型” action opens the full Model Center, focused on the current feature. Returning from Model Center must restore the originating tool.
+- Selecting a model is not the same as loading it. “正在使用” is shown only while the selected model is actually loaded/active for a task. “已下载并校验” and “运行时支持” remain separate facts.
+- Models without a matching Android runtime family may be browsed in the full library but cannot be presented as ready-to-use recommendations.
+
+### TTS workspace
+- TTS is a normal creation tool, not a separate model-first destination.
+- The text editor, voice provider / voice selection, rate and pitch, preview / synthesis, output playback and export remain primary.
+- A compact local voice-model selector and download action are placed near the bottom of the TTS workspace. Android system TTS remains available without downloading a model.
+- Add a subtitle area with preview and export. Timestamped subtitle export must use measured synthesis / playback timing or model-provided alignment; never fabricate word-level timestamps.
+
+### Back navigation and system bars
+- Remove in-page top back buttons from tool and model pages. Use Android system Back gesture / button to return to the previous in-app level.
+- From a tool workspace, one Back returns to the creation grid. From the creation root, the first Back shows an exit hint and the second Back within the confirmation window exits.
+- Status and navigation bar icon contrast follows the effective light/dark surface. Recompute after appearance or palette changes.
+
+### Appearance settings
+- Add independent appearance mode: Follow system / Light / Dark.
+- Keep palette choice independent of appearance mode.
+- Show six palette choices in a three-column grid with Chinese names and a visible color swatch.
+- Main screen, dialogs, model center and system bars must share the effective appearance mode.
+
+### Launcher icon
+- Replace the current multi-bar mark with a simpler, single-stroke audio waveform. Keep adaptive foreground/background and monochrome themed-icon resources.
