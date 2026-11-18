@@ -378,6 +378,11 @@ class ModelCenterActivity : ComponentActivity() {
         Toast.makeText(this, "已加入下载队列：${model.name}", Toast.LENGTH_SHORT).show()
     }
 
+    override fun onDestroy() {
+        modelCheckExecutor.shutdownNow()
+        super.onDestroy()
+    }
+
     private fun params() = LinearLayout.LayoutParams(
         ViewGroup.LayoutParams.MATCH_PARENT,
         ViewGroup.LayoutParams.WRAP_CONTENT
