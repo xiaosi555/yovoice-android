@@ -43,6 +43,11 @@ class LineIconView(context: Context, private val kind: String, private val tint:
                 canvas.drawRoundRect(3f, 14f, 10f, 21f, 1.5f, 1.5f, paint)
                 canvas.drawRoundRect(14f, 14f, 21f, 21f, 1.5f, 1.5f, paint)
             }
+            "folder" -> {
+                path.moveTo(3f, 7f); path.lineTo(9.5f, 7f); path.lineTo(11.5f, 9.5f)
+                path.lineTo(21f, 9.5f); path.lineTo(21f, 19f); path.lineTo(3f, 19f); path.close()
+                canvas.drawRoundRect(3f, 5f, 10f, 9f, 1.2f, 1.2f, paint)
+            }
             "settings" -> {
                 canvas.drawCircle(12f, 12f, 3.2f, paint)
                 val angles = floatArrayOf(0f,45f,90f,135f,180f,225f,270f,315f)
