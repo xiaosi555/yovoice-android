@@ -17,7 +17,7 @@ object TtsProviderRegistry {
         return runCatching {
             context.packageManager.queryIntentServices(
                 Intent(TextToSpeech.Engine.INTENT_ACTION_TTS_SERVICE),
-                PackageManager.MATCH_DEFAULT_ONLY
+                PackageManager.GET_META_DATA
             ).mapNotNull { resolved ->
                 val service = resolved.serviceInfo ?: return@mapNotNull null
                 val packageName = service.packageName?.takeIf { it.isNotBlank() }
