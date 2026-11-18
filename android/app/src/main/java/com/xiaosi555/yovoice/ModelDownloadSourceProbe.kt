@@ -20,7 +20,7 @@ object ModelDownloadSourceProbe {
     private const val PROBE_BYTES = 192 * 1024
 
     fun select(model: ModelEntry, revision: String): DownloadSourceSpeed? {
-        val firstFile = model.packageFiles().firstOrNull() ?: return null
+        val firstFile = model.packageFiles().maxByOrNull { it.size } ?: return null
         val candidates = listOf(
             "huggingface" to "Hugging Face",
             "mirror" to "HF 镜像",

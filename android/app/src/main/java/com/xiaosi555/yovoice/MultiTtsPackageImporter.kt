@@ -71,7 +71,10 @@ object MultiTtsPackageImporter {
                 val config = zip.getInputStream(configEntry).bufferedReader(Charsets.UTF_8).use { it.readText() }
                 val engines = zip.getInputStream(enginesEntry).bufferedReader(Charsets.UTF_8).use { it.readText() }
                 val datPaths = entries.map { it.name.replace('\\', '/') }
-                    .filter { it.contains("/isstts/xTTSRes/") && it.endsWith(".voc.dat", true) }
+                    .filter {
+                        (it.startsWith("isstts/xTTSRes/") || it.contains("/isstts/xTTSRes/")) &&
+                            it.endsWith(".voc.dat", true)
+                    }
                 val descTexts = entries.filter { it.name.endsWith(".desc", true) }.associate { entry ->
                     val key = normalize(entry.name.substringAfterLast('/').removeSuffix(".desc"))
                     key to zip.getInputStream(entry).bufferedReader(Charsets.UTF_8).use { it.readText().take(16_384) }
@@ -160,7 +163,13 @@ object MultiTtsPackageImporter {
             val code = fields["code"].orEmpty()
             val name = fields["name"].orEmpty()
             if (code.isNotBlank() && name.isNotBlank()) {
-                val dat = datByBase[normalize(code)]
+                val yamlDesc = fields["desc"].orEmpty()
+                val descMatchedDat = if (yamlDesc.isBlank()) null else datPaths.firstOrNull { path ->
+                    val base = normalize(path.substringAfterLast('/').removeSuffix(".voc.dat"))
+                    val content = descTexts[base].orEmpty()
+                    content.isNotBlank() && normalize(content) == normalize(yamlDesc)
+                }
+                val dat = datByBase[normalize(code)] ?: descMatchedDat
                 val desc = descTexts[normalize(code)]
                     ?: dat?.substringAfterLast('/')?.removeSuffix(".voc.dat")?.let { descTexts[normalize(it)] }
                 result += MultiTtsSpeaker(
