@@ -1581,6 +1581,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             nativeExecutor.shutdown()
         }
         assistantExecutor.shutdownNow()
+        storageExecutor.shutdownNow()
         runCatching { tts?.stop() }; runCatching { tts?.shutdown() }; tts = null
         super.onDestroy()
     }
