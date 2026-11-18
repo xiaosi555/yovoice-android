@@ -503,6 +503,35 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         body.addView(infoRow("手机系统 TTS", if (ttsReady) "已就绪" else "未就绪或正在检测"), marginTop(8))
         body.addView(secondaryButton("选择语音引擎 / 打开系统语音设置") { showTtsOptions() }, marginTop(8))
         body.addView(infoRow("Android 本地推理引擎", "Audio8 TTS · Qwen3 ASR 0.6B"), marginTop(8))
+        body.addView(label("本地推理性能", 17, p.text, true), marginTop(24))
+        val runtimePrefs = getSharedPreferences("yovoice-runtime", MODE_PRIVATE)
+        val currentThreads = runtimePrefs.getInt("threads", 2).coerceIn(1, 4)
+        val threadLabel = label("推理线程：$currentThreads", 13, p.secondary)
+        body.addView(threadLabel, marginTop(8))
+        body.addView(SeekBar(this).apply {
+            max = 3
+            progress = currentThreads - 1
+            setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+                override fun onProgressChanged(seekBar: SeekBar?, value: Int, fromUser: Boolean) {
+                    val threads = value + 1
+                    threadLabel.text = "推理线程：$threads"
+                    if (fromUser) runtimePrefs.edit().putInt("threads", threads).apply()
+                }
+                override fun onStartTrackingTouch(seekBar: SeekBar?) {}
+                override fun onStopTrackingTouch(seekBar: SeekBar?) {}
+            })
+        }, marginTop(4))
+        body.addView(label("线程数会影响速度与耗电；内存有限时建议保持 2。修改后对下一次模型加载生效。", 12, p.secondary), marginTop(4))
+        val modelDir = File(filesDir, "models")
+        val projectDir = File(filesDir, "projects")
+        val modelBytes = directoryBytes(modelDir)
+        val projectBytes = directoryBytes(projectDir)
+        val freeBytes = runCatching { android.os.StatFs(filesDir.absolutePath).availableBytes }.getOrDefault(0L)
+        body.addView(infoRow("本地存储", "模型：${formatStorage(modelBytes)} · 作品：${formatStorage(projectBytes)}\\n应用可用空间：${formatStorage(freeBytes)}\\n模型目录：${modelDir.absolutePath}"), marginTop(10))
+        body.addView(secondaryButton("打开系统应用设置") {
+            val intent = Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:" + packageName))
+            startActivity(intent)
+        }, marginTop(8))
         body.addView(label("AI 助手服务", 17, p.text, true), marginTop(24))
         val assistantPrefs = getSharedPreferences("yovoice-assistant", MODE_PRIVATE)
         val endpointInput = EditText(this).apply {
@@ -521,8 +550,8 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         }
         body.addView(modelInput, marginTop(8))
         val keyInput = EditText(this).apply {
-            hint = "API Key（仅保存在本机应用私有配置中）"
-            setText(assistantPrefs.getString("api_key", ""))
+            hint = "API Key（使用 Android Keystore 加密保存）"
+            setText(runCatching { ApiKeyStore.get(this@MainActivity) }.getOrDefault(""))
             textSize = 14f; setTextColor(p.text); setHintTextColor(p.secondary)
             inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD
             background = shape(p.surface, dp(12), p.border, dp(1)); setPadding(dp(12), dp(10), dp(12), dp(10))
@@ -535,14 +564,22 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             if (!endpoint.startsWith("https://") || model.isBlank() || key.isBlank()) {
                 Toast.makeText(this, "请填写 HTTPS 地址、模型名称和 API Key", Toast.LENGTH_LONG).show()
             } else {
-                assistantPrefs.edit().putString("endpoint", endpoint).putString("model", model).putString("api_key", key).apply()
-                Toast.makeText(this, "AI 服务配置已保存在本机", Toast.LENGTH_SHORT).show()
+                runCatching {
+                    ApiKeyStore.save(this, key)
+                    assistantPrefs.edit().putString("endpoint", endpoint).putString("model", model).apply()
+                }.onSuccess {
+                    Toast.makeText(this, "AI 服务配置已使用 Android Keystore 加密保存", Toast.LENGTH_SHORT).show()
+                }.onFailure {
+                    Toast.makeText(this, "保存失败：" + (it.localizedMessage ?: "加密存储不可用"), Toast.LENGTH_LONG).show()
+                }
             }
         }, marginTop(10))
         body.addView(secondaryButton("清除本机保存的 API Key") {
-            assistantPrefs.edit().remove("api_key").apply(); keyInput.setText("")
-            Toast.makeText(this, "已清除本机 API Key", Toast.LENGTH_SHORT).show()
+            runCatching { ApiKeyStore.clear(this) }
+                .onSuccess { keyInput.setText(""); Toast.makeText(this, "已清除本机 API Key", Toast.LENGTH_SHORT).show() }
+                .onFailure { Toast.makeText(this, "清除失败：" + (it.localizedMessage ?: "未知错误"), Toast.LENGTH_LONG).show() }
         }, marginTop(6))
+        body.addView(label("隐私提示：使用 AI 助手时，输入的创作内容会发送到你配置的第三方服务商；请勿提交密码、密钥或其他敏感信息。API Key 使用 Android Keystore 加密保存。", 12, p.secondary), marginTop(12))
         body.addView(label("主题名称与颜色沿用 Yovoice 桌面版主题体系；移动端针对单手操作重新排布。", 12, p.secondary), marginTop(18))
     }
 
@@ -550,7 +587,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         val prefs = getSharedPreferences("yovoice-assistant", MODE_PRIVATE)
         val endpoint = prefs.getString("endpoint", "https://api.openai.com/v1").orEmpty().trim().trimEnd('/')
         val model = prefs.getString("model", "gpt-4o-mini").orEmpty().trim()
-        val apiKey = prefs.getString("api_key", "").orEmpty().trim()
+        val apiKey = runCatching { ApiKeyStore.get(this) }.getOrDefault("").trim()
         if (!endpoint.startsWith("https://") || model.isBlank() || apiKey.isBlank()) {
             Toast.makeText(this, "请先到设置配置 HTTPS 服务地址、模型和 API Key", Toast.LENGTH_LONG).show()
             page = 3
@@ -605,6 +642,26 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                 if (!destroyed && !isFinishing) output.text = result
             }
         }
+    }
+
+    private fun nativeThreads(): Int =
+        getSharedPreferences("yovoice-runtime", MODE_PRIVATE).getInt("threads", 2).coerceIn(1, 4)
+
+    private fun directoryBytes(directory: File): Long {
+        if (!directory.exists()) return 0L
+        return directory.walkTopDown().filter { it.isFile }.sumOf { it.length() }
+    }
+
+    private fun formatStorage(bytes: Long): String {
+        if (bytes < 1024L) return "$bytes B"
+        val units = arrayOf("KB", "MB", "GB", "TB")
+        var value = bytes.toDouble()
+        var unit = -1
+        while (value >= 1024.0 && unit < units.lastIndex) {
+            value /= 1024.0
+            unit++
+        }
+        return "%.1f %s".format(Locale.US, value, units[unit])
     }
 
     private fun attachDraft(editText: EditText, key: String) {
@@ -707,7 +764,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                 check(modelFile.isFile && modelFile.length() > 0L) { "模型主文件不存在或为空" }
 
                 runOnUiThread { if (!destroyed && ::status.isInitialized) status.text = "正在加载本地 Audio8 模型（首次加载可能较久）…" }
-                val loaded = JSONObject(NativeEngine.loadModel(modelFile.absolutePath, model.family, 2))
+                val loaded = JSONObject(NativeEngine.loadModel(modelFile.absolutePath, model.family, nativeThreads()))
                 check(loaded.optBoolean("ok")) { loaded.optString("error", "模型加载失败") }
 
                 val projectDir = File(filesDir, "projects")
@@ -936,7 +993,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                 val alignerFile = File(modelRoot, model.localRelativePath(alignerAsset.path))
                 check(alignerFile.isFile) { "强制对齐器文件不存在，请重新下载完整 ASR 模型包" }
                 val loaded = JSONObject(NativeEngine.loadTaskModel(
-                    modelFile.absolutePath, model.family, "asr", "offline", auxiliaryPath = alignerFile.absolutePath
+                    modelFile.absolutePath, model.family, "asr", "offline", threads = nativeThreads(), auxiliaryPath = alignerFile.absolutePath
                 ))
                 check(loaded.optBoolean("ok")) { loaded.optString("error", "ASR 模型加载失败") }
                 runOnUiThread {
@@ -1030,7 +1087,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                 val modelRoot = ModelCatalog.installedDirectory(this, model.id)
                 val modelFile = File(modelRoot, model.localRelativePath(model.remotePath))
                 check(modelFile.isFile) { "Audio8 TTS 模型文件不存在，请重新下载" }
-                val loaded = JSONObject(NativeEngine.loadTaskModel(modelFile.absolutePath, model.family, "clon", "offline"))
+                val loaded = JSONObject(NativeEngine.loadTaskModel(modelFile.absolutePath, model.family, "clon", "offline", threads = nativeThreads()))
                 check(loaded.optBoolean("ok")) { loaded.optString("error", "声音克隆模型加载失败") }
                 runOnUiThread {
                     if (!destroyed && !isFinishing) cloneStatusView?.text = "模型已加载，正在克隆声音并生成语音…"
@@ -1103,7 +1160,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                 check(ModelCatalog.isInstalled(this, model)) { "请先下载 Stable Audio 3 Small Music Q8 模型（约 1.68 GB）" }
                 val modelFile = File(ModelCatalog.installedDirectory(this, model.id), model.localRelativePath(model.remotePath))
                 check(modelFile.isFile) { "音乐模型文件不存在，请重新下载" }
-                val loaded = JSONObject(NativeEngine.loadTaskModel(modelFile.absolutePath, model.family, "gen", "offline"))
+                val loaded = JSONObject(NativeEngine.loadTaskModel(modelFile.absolutePath, model.family, "gen", "offline", threads = nativeThreads()))
                 check(loaded.optBoolean("ok")) { loaded.optString("error", "音乐模型加载失败") }
                 runOnUiThread { if (!destroyed && !isFinishing) musicStatusView?.text = "模型已加载，正在生成音乐…" }
                 val outputDir = File(filesDir, "music")
@@ -1153,7 +1210,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                 val pcm = AndroidAudioDecoder.decodeToPcm(this, uri, 44_100, 2, 180)
                 val modelFile = File(ModelCatalog.installedDirectory(this, model.id), model.localRelativePath(model.remotePath))
                 check(modelFile.isFile) { "六轨模型文件不存在，请重新下载" }
-                val loaded = JSONObject(NativeEngine.loadTaskModel(modelFile.absolutePath, model.family, "sep", "offline"))
+                val loaded = JSONObject(NativeEngine.loadTaskModel(modelFile.absolutePath, model.family, "sep", "offline", threads = nativeThreads()))
                 check(loaded.optBoolean("ok")) { loaded.optString("error", "音轨分离模型加载失败") }
                 runOnUiThread { if (!destroyed && !isFinishing) stemStatusView?.text = "模型已加载，正在分离六条音轨…" }
                 val outputDir = File(filesDir, "stems/stems-" + System.currentTimeMillis())
@@ -1210,7 +1267,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                 val pcm = AndroidAudioDecoder.decodeToPcm(this, uri, 44_100, 2, 180)
                 val modelFile = File(ModelCatalog.installedDirectory(this, model.id), model.localRelativePath(model.remotePath))
                 check(modelFile.isFile) { "MuScriptor 模型文件不存在，请重新下载" }
-                val loaded = JSONObject(NativeEngine.loadTaskModel(modelFile.absolutePath, model.family, "midi", "offline"))
+                val loaded = JSONObject(NativeEngine.loadTaskModel(modelFile.absolutePath, model.family, "midi", "offline", threads = nativeThreads()))
                 check(loaded.optBoolean("ok")) { loaded.optString("error", "MIDI 模型加载失败") }
                 runOnUiThread { if (!destroyed && !isFinishing) midiStatusView?.text = "模型已加载，正在提取音符事件…" }
                 val outputDir = File(filesDir, "midi")
