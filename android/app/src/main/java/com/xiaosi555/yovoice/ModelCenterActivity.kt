@@ -115,7 +115,7 @@ class ModelCenterActivity : ComponentActivity() {
         val search = EditText(this).apply {
             hint = "搜索模型名称或模型家族"
             textSize = 14f
-            singleLine = true
+            setSingleLine(true)
             setTextColor(primaryText)
             setHintTextColor(secondaryText)
             setPadding(dp(12), dp(8), dp(12), dp(8))
