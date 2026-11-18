@@ -557,6 +557,87 @@ Java_com_xiaosi555_yovoice_NativeEngine_nativeGenerate(
     return make_string(env, json.str());
 }
 
+extern "C" JNIEXPORT jstring JNICALL
+Java_com_xiaosi555_yovoice_NativeEngine_nativeSeparate(
+    JNIEnv* env, jobject, jfloatArray pcm_array, jint sample_rate, jint channels, jstring output_directory
+) {
+    UtfChars directory(env, output_directory);
+    if (pcm_array == nullptr || sample_rate <= 0 || channels <= 0 || directory.get()[0] == '\0') {
+        return make_string(env, failure_json("待分离音频或输出目录无效"));
+    }
+    const jsize sample_count = env->GetArrayLength(pcm_array);
+    if (sample_count <= 0 || sample_count > 120000000 || sample_count % channels != 0) {
+        return make_string(env, failure_json("输入音频长度或声道布局无效"));
+    }
+    jfloat* samples = env->GetFloatArrayElements(pcm_array, nullptr);
+    if (samples == nullptr) return make_string(env, failure_json("无法读取待分离音频 PCM"));
+    std::lock_guard<std::mutex> lock(g_mutex);
+    if (g_state.session == nullptr || g_state.task != "sep") {
+        env->ReleaseFloatArrayElements(pcm_array, samples, JNI_ABORT);
+        return make_string(env, failure_json("请先加载音轨分离模型"));
+    }
+    audiocpp_request* request = audiocpp_request_create();
+    if (request == nullptr) {
+        env->ReleaseFloatArrayElements(pcm_array, samples, JNI_ABORT);
+        return make_string(env, failure_json("无法创建音轨分离请求"));
+    }
+    audiocpp_status status = audiocpp_request_set_audio(
+        request, samples, static_cast<size_t>(sample_count) / static_cast<size_t>(channels), sample_rate, channels);
+    env->ReleaseFloatArrayElements(pcm_array, samples, JNI_ABORT);
+    if (status != AUDIOCPP_OK) {
+        const std::string message = status_message(status);
+        audiocpp_request_free(request);
+        return make_string(env, failure_json(message));
+    }
+    audiocpp_result* result = nullptr;
+    status = audiocpp_session_run(g_state.session, request, &result);
+    audiocpp_request_free(request);
+    if (status != AUDIOCPP_OK || result == nullptr) {
+        const std::string message = status_message(status);
+        if (result != nullptr) audiocpp_result_free(result);
+        return make_string(env, failure_json(message));
+    }
+    std::error_code directory_error;
+    std::filesystem::create_directories(directory.get(), directory_error);
+    if (directory_error) {
+        audiocpp_result_free(result);
+        return make_string(env, failure_json("无法创建分离音轨输出目录"));
+    }
+    std::ostringstream json;
+    json << "{\"ok\":true,\"stems\":[";
+    bool first = true;
+    const size_t count = audiocpp_result_named_audio_count(result);
+    for (size_t i = 0; i < count; ++i) {
+        const char* name = nullptr;
+        const float* stem_samples = nullptr;
+        size_t frames = 0;
+        int stem_rate = 0;
+        int stem_channels = 0;
+        if (audiocpp_result_named_audio(result, i, &name, &stem_samples, &frames, &stem_rate, &stem_channels) != AUDIOCPP_OK) continue;
+        const std::string raw_name = name == nullptr ? "stem" : name;
+        std::string safe_name;
+        for (const unsigned char ch : raw_name) {
+            safe_name.push_back((std::isalnum(ch) || ch == '-' || ch == '_') ? static_cast<char>(ch) : '_');
+        }
+        if (safe_name.empty()) safe_name = "stem_" + std::to_string(i + 1);
+        const std::string path = (std::filesystem::path(directory.get()) / (safe_name + ".wav")).string();
+        std::string write_error;
+        if (!write_wav(path, stem_samples, frames, stem_rate, stem_channels, &write_error)) {
+            audiocpp_result_free(result);
+            return make_string(env, failure_json(write_error));
+        }
+        if (!first) json << ",";
+        json << "{\"name\":\"" << json_escape(raw_name) << "\",\"path\":\""
+             << json_escape(path) << "\",\"sampleRate\":" << stem_rate
+             << ",\"channels\":" << stem_channels << "}";
+        first = false;
+    }
+    audiocpp_result_free(result);
+    if (first) return make_string(env, failure_json("分离模型没有返回命名音轨"));
+    json << "]}";
+    return make_string(env, json.str());
+}
+
 extern "C" JNIEXPORT void JNICALL
 Java_com_xiaosi555_yovoice_NativeEngine_nativeUnload(JNIEnv*, jobject) {
     std::lock_guard<std::mutex> lock(g_mutex);
