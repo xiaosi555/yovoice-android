@@ -60,6 +60,63 @@ class LineIconView(context: Context, private val kind: String, private val tint:
                     canvas.drawLine(x1, y1, x2, y2, paint)
                 }
             }
+            "tts" -> {
+                path.moveTo(3f, 10f); path.lineTo(7f, 10f); path.lineTo(11f, 6f); path.lineTo(11f, 18f); path.lineTo(7f, 14f); path.lineTo(3f, 14f); path.close()
+                canvas.drawArc(8f, 5f, 19f, 19f, -55f, 110f, false, paint)
+                canvas.drawArc(8f, 2f, 23f, 22f, -55f, 110f, false, paint)
+            }
+            "clone" -> {
+                canvas.drawCircle(8f, 9f, 4f, paint); canvas.drawCircle(16f, 15f, 4f, paint)
+                path.moveTo(3f, 20f); path.lineTo(6f, 17f); path.lineTo(9f, 20f)
+                path.moveTo(15f, 4f); path.lineTo(18f, 7f); path.lineTo(21f, 4f)
+            }
+            "story" -> {
+                path.moveTo(3f, 5f); path.lineTo(10f, 5f); path.quadTo(12f, 5f, 12f, 8f); path.lineTo(12f, 20f); path.quadTo(12f, 17f, 9f, 17f); path.lineTo(3f, 17f); path.close()
+                path.moveTo(21f, 5f); path.lineTo(14f, 5f); path.quadTo(12f, 5f, 12f, 8f); path.lineTo(12f, 20f); path.quadTo(12f, 17f, 15f, 17f); path.lineTo(21f, 17f); path.close()
+                path.moveTo(6f, 9f); path.lineTo(9f, 9f); path.moveTo(15f, 9f); path.lineTo(18f, 9f)
+            }
+            "asr" -> {
+                path.moveTo(3f, 12f); path.lineTo(6f, 12f); path.lineTo(8f, 7f); path.lineTo(11f, 17f); path.lineTo(14f, 9f); path.lineTo(17f, 14f); path.lineTo(21f, 14f)
+                path.moveTo(5f, 20f); path.lineTo(19f, 20f)
+            }
+            "music" -> {
+                path.moveTo(14f, 17f); path.lineTo(14f, 5f); path.lineTo(21f, 3f); path.lineTo(21f, 15f)
+                canvas.drawCircle(10f, 18f, 3f, paint); canvas.drawCircle(17f, 16f, 3f, paint)
+            }
+            "stems" -> {
+                canvas.drawRoundRect(3f, 4f, 21f, 9f, 2f, 2f, paint)
+                canvas.drawRoundRect(3f, 11f, 21f, 16f, 2f, 2f, paint)
+                canvas.drawRoundRect(3f, 18f, 21f, 22f, 2f, 2f, paint)
+                path.moveTo(7f, 6.5f); path.lineTo(10f, 6.5f); path.moveTo(7f, 13.5f); path.lineTo(15f, 13.5f); path.moveTo(7f, 20f); path.lineTo(12f, 20f)
+            }
+            "midi" -> {
+                canvas.drawRoundRect(3f, 4f, 21f, 20f, 2f, 2f, paint)
+                path.moveTo(7f, 4f); path.lineTo(7f, 20f); path.moveTo(11f, 4f); path.lineTo(11f, 20f); path.moveTo(15f, 4f); path.lineTo(15f, 20f)
+                path.moveTo(5f, 11f); path.lineTo(5f, 14f); path.moveTo(9f, 11f); path.lineTo(9f, 14f); path.moveTo(13f, 11f); path.lineTo(13f, 14f); path.moveTo(17f, 11f); path.lineTo(17f, 14f)
+            }
+            "assistant" -> {
+                path.moveTo(12f, 2f); path.lineTo(14f, 9f); path.lineTo(21f, 12f); path.lineTo(14f, 14f); path.lineTo(12f, 22f); path.lineTo(10f, 14f); path.lineTo(3f, 12f); path.lineTo(10f, 9f); path.close()
+                canvas.drawCircle(19f, 5f, 1.3f, paint); canvas.drawCircle(5f, 19f, 1.2f, paint)
+            }
+            "import" -> {
+                path.moveTo(12f, 3f); path.lineTo(12f, 15f); path.moveTo(7f, 10f); path.lineTo(12f, 15f); path.lineTo(17f, 10f)
+                path.moveTo(4f, 17f); path.lineTo(4f, 21f); path.lineTo(20f, 21f); path.lineTo(20f, 17f)
+            }
+            "models" -> {
+                path.moveTo(12f, 3f); path.lineTo(21f, 8f); path.lineTo(12f, 13f); path.lineTo(3f, 8f); path.close()
+                path.moveTo(3f, 8f); path.lineTo(3f, 18f); path.lineTo(12f, 23f); path.lineTo(21f, 18f); path.lineTo(21f, 8f)
+                path.moveTo(12f, 13f); path.lineTo(12f, 23f)
+            }
+            "back" -> {
+                path.moveTo(19f, 12f); path.lineTo(5f, 12f); path.moveTo(11f, 6f); path.lineTo(5f, 12f); path.lineTo(11f, 18f)
+            }
+            "chevron" -> {
+                path.moveTo(9f, 5f); path.lineTo(16f, 12f); path.lineTo(9f, 19f)
+            }
+            "download" -> {
+                path.moveTo(12f, 3f); path.lineTo(12f, 16f); path.moveTo(6f, 11f); path.lineTo(12f, 17f); path.lineTo(18f, 11f)
+                path.moveTo(4f, 20f); path.lineTo(20f, 20f)
+            }
         }
         if (kind != "grid" && kind != "settings") canvas.drawPath(path, paint)
         canvas.restore()
