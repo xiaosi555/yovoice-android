@@ -60,6 +60,8 @@ class MainActivity : Activity() {
     private lateinit var enginePicker: TextView
     private lateinit var speedLabel: TextView
     private lateinit var pitchLabel: TextView
+    private lateinit var speedSeekBar: SeekBar
+    private lateinit var pitchSeekBar: SeekBar
     private var asrStatusView: TextView? = null
     private var asrResultView: TextView? = null
     private var pendingTextExport: String = ""
@@ -252,7 +254,7 @@ class MainActivity : Activity() {
         panel.addView(voicePicker, marginTop(4))
         speedLabel = label("语速 1.0×", 13, p.secondary)
         panel.addView(speedLabel, marginTop(10))
-        panel.addView(SeekBar(this).apply {
+        speedSeekBar = SeekBar(this).apply {
             max = 30
             progress = (speechRate * 10).toInt().coerceIn(1, 30)
             setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
@@ -272,10 +274,11 @@ class MainActivity : Activity() {
                 override fun onStartTrackingTouch(seekBar: SeekBar?) {}
                 override fun onStopTrackingTouch(seekBar: SeekBar?) {}
             })
-        })
+        }
+        panel.addView(speedSeekBar, marginTop(2))
         pitchLabel = label("音调 1.0×", 13, p.secondary)
         panel.addView(pitchLabel, marginTop(8))
-        panel.addView(SeekBar(this).apply {
+        pitchSeekBar = SeekBar(this).apply {
             max = 30
             progress = (speechPitch * 10).toInt().coerceIn(1, 30)
             setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
@@ -295,7 +298,8 @@ class MainActivity : Activity() {
                 override fun onStartTrackingTouch(seekBar: SeekBar?) {}
                 override fun onStopTrackingTouch(seekBar: SeekBar?) {}
             })
-        })
+        }
+        panel.addView(pitchSeekBar, marginTop(2))
 
         panel.addView(primaryButton("试听朗读（手机 TTS）") { speak() }, marginTop(10))
         panel.addView(secondaryButton("本地语音 · Audio8 TTS") { speakWithLocalModel() }, marginTop(9))
@@ -1154,6 +1158,8 @@ class MainActivity : Activity() {
         speechPitch = enginePrefs.getFloat("speech_pitch:" + provider.packageName, speechPitch).coerceIn(0.1f, 3.0f)
         if (::speedLabel.isInitialized) speedLabel.text = "语速 %.1f×".format(speechRate)
         if (::pitchLabel.isInitialized) pitchLabel.text = "音调 %.1f×".format(speechPitch)
+        if (::speedSeekBar.isInitialized) speedSeekBar.progress = (speechRate * 10).toInt().coerceIn(1, 30)
+        if (::pitchSeekBar.isInitialized) pitchSeekBar.progress = (speechPitch * 10).toInt().coerceIn(1, 30)
         if (persist) {
             getSharedPreferences("yovoice-tts", MODE_PRIVATE).edit()
                 .putString("selected_tts_engine_id", provider.packageName).apply()
@@ -1191,6 +1197,13 @@ class MainActivity : Activity() {
                         ttsReady = false
                         activeTtsEngineId = "native:audio8"
                         activeTtsEngineLabel = "Audio8 本地引擎"
+                        val nativePrefs = getSharedPreferences("yovoice-tts", MODE_PRIVATE)
+                        speechRate = nativePrefs.getFloat("speech_rate:native:audio8", speechRate).coerceIn(0.1f, 3.0f)
+                        speechPitch = nativePrefs.getFloat("speech_pitch:native:audio8", speechPitch).coerceIn(0.1f, 3.0f)
+                        if (::speedLabel.isInitialized) speedLabel.text = "语速 %.1f×".format(speechRate)
+                        if (::pitchLabel.isInitialized) pitchLabel.text = "音调 %.1f×".format(speechPitch)
+                        if (::speedSeekBar.isInitialized) speedSeekBar.progress = (speechRate * 10).toInt().coerceIn(1, 30)
+                        if (::pitchSeekBar.isInitialized) pitchSeekBar.progress = (speechPitch * 10).toInt().coerceIn(1, 30)
                         selectedVoiceName = null
                         getSharedPreferences("yovoice-tts", MODE_PRIVATE).edit()
                             .putString("selected_tts_engine_id", activeTtsEngineId).apply()
