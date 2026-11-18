@@ -42,6 +42,7 @@ class ModelCenterActivity : AppCompatActivity() {
     private lateinit var sourcePicker: Spinner
     private val downloadStates = mutableMapOf<String, WorkInfo.State?>()
     private val modelCheckExecutor = Executors.newFixedThreadPool(2)
+    private val sourceProbeExecutor = Executors.newFixedThreadPool(3)
     @Volatile private var runtimeFamilies: Set<String> = emptySet()
     @Volatile private var runtimeReady: Boolean = false
     private val themeIndex by lazy { getSharedPreferences("yovoice-ui", MODE_PRIVATE).getInt("theme", 0).coerceIn(0, 5) }
@@ -170,7 +171,7 @@ class ModelCenterActivity : AppCompatActivity() {
             adapter = ArrayAdapter(
                 this@ModelCenterActivity,
                 android.R.layout.simple_spinner_dropdown_item,
-                listOf("Hugging Face（默认）", "HF 镜像", "ModelScope")
+                listOf("自动测速并选择最快源", "Hugging Face", "HF 镜像", "ModelScope")
             )
         }
         root.addView(TextView(this).apply {
@@ -390,6 +391,7 @@ class ModelCenterActivity : AppCompatActivity() {
         var installed = false
         var latestInfo: WorkInfo? = null
         var verifiedForSucceeded = false
+        var probingSource = false
         val actionRow = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL or Gravity.END
@@ -418,7 +420,7 @@ class ModelCenterActivity : AppCompatActivity() {
                 state == WorkInfo.State.CANCELLED -> "继续下载"
                 else -> "下载模型"
             }
-            updateIconAction(downloadAction, downloadIcon, downloadDescription, downloadable && !installed)
+            updateIconAction(downloadAction, downloadIcon, if (probingSource) "正在测速下载源…" else downloadDescription, downloadable && !installed && !probingSource)
             val canUse = installed && runtimeReady && model.family in runtimeFamilies &&
                 ModelFeatureGuide.features.any { model.family in it.modelFamilies }
             updateIconAction(useAction, "play",
@@ -482,13 +484,45 @@ class ModelCenterActivity : AppCompatActivity() {
         }
 
         downloadAction.setOnClickListener {
-            if (!downloadable || installed) return@setOnClickListener
+            if (!downloadable || installed || probingSource) return@setOnClickListener
             when (state) {
                 WorkInfo.State.RUNNING, WorkInfo.State.ENQUEUED, WorkInfo.State.BLOCKED -> {
                     workManager.cancelUniqueWork(uniqueName)
                     Toast.makeText(this, "已请求暂停，保留下载断点", Toast.LENGTH_SHORT).show()
                 }
-                else -> enqueue(model, uniqueName)
+                else -> {
+                    val selectedSource = when (sourcePicker.selectedItemPosition) {
+                        1 -> "huggingface"
+                        2 -> "mirror"
+                        3 -> "modelscope"
+                        else -> null
+                    }
+                    if (selectedSource != null) {
+                        enqueue(model, uniqueName, selectedSource)
+                    } else {
+                        probingSource = true
+                        status.text = "正在对模型文件进行小流量测速（每个源最多约 192 KB）…"
+                        updateActions()
+                        sourceProbeExecutor.execute {
+                            val fastest = runCatching {
+                                ModelDownloadSourceProbe.select(model, ModelCatalog.revision(this@ModelCenterActivity))
+                            }.getOrNull()
+                            runOnUiThread {
+                                if (isFinishing || isDestroyed) return@runOnUiThread
+                                probingSource = false
+                                if (fastest == null) {
+                                    status.text = "候选下载源均未能完成测速，请检查网络后重试。"
+                                    Toast.makeText(this, "没有可用的模型下载源", Toast.LENGTH_LONG).show()
+                                    updateActions()
+                                } else {
+                                    status.text = "已选择最快下载源：${fastest.label} · ${fastest.formattedSpeed()}，开始下载…"
+                                    enqueue(model, uniqueName, fastest.source)
+                                    updateActions()
+                                }
+                            }
+                        }
+                    }
+                }
             }
         }
         useAction.setOnClickListener {
@@ -585,12 +619,7 @@ class ModelCenterActivity : AppCompatActivity() {
         }
     }
 
-    private fun enqueue(model: ModelEntry, uniqueName: String) {
-        val source = when (sourcePicker.selectedItemPosition) {
-            1 -> "mirror"
-            2 -> "modelscope"
-            else -> "huggingface"
-        }
+    private fun enqueue(model: ModelEntry, uniqueName: String, source: String)
         val request = OneTimeWorkRequestBuilder<ModelDownloadWorker>()
             .setInputData(workDataOf(
                 ModelDownloadWorker.KEY_MODEL_ID to model.id,
@@ -605,6 +634,7 @@ class ModelCenterActivity : AppCompatActivity() {
 
     override fun onDestroy() {
         modelCheckExecutor.shutdownNow()
+        sourceProbeExecutor.shutdownNow()
         super.onDestroy()
     }
 
