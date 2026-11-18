@@ -160,7 +160,7 @@ class ModelCenterActivity : AppCompatActivity() {
         }
         root.addView(header, params())
         root.addView(TextView(this).apply {
-            text = "${ModelCatalog.load(this@ModelCenterActivity).size} 个模型 · 下载后自动校验"
+            text = "${ModelCatalog.load(this@ModelCenterActivity).size} 个模型 · 默认按体积从小到大 · 下载后校验"
             textSize = 12f
             setTextColor(secondaryText)
             setPadding(0, dp(2), 0, dp(8))
@@ -215,9 +215,13 @@ class ModelCenterActivity : AppCompatActivity() {
 
         val featureCategories = ModelFeatureGuide.features.filter { it.modelFamilies.isNotEmpty() }
         val mappedFamilies = featureCategories.flatMap { it.modelFamilies }.toSet()
-        val categories = mutableListOf("all" to "全部模型")
-        featureCategories.forEach { categories.add(it.id to it.name) }
-        if (models.any { it.family !in mappedFamilies }) categories.add("other" to "其他模型")
+        val categories = mutableListOf("all" to "全部模型 ${models.size}")
+        featureCategories.forEach { feature ->
+            val count = models.count { it.family in feature.modelFamilies }
+            categories.add(feature.id to "${feature.name} $count")
+        }
+        val otherCount = models.count { it.family !in mappedFamilies }
+        if (otherCount > 0) categories.add("other" to "其他模型 $otherCount")
         var selectedCategory = intent.getStringExtra("focus_feature")
             ?.takeIf { requested -> categories.any { it.first == requested } } ?: "all"
         var refreshModels: () -> Unit = {}
