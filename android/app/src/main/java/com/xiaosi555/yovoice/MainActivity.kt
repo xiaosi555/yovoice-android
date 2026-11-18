@@ -167,6 +167,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             background = shape(p.bg, dp(14), p.border, dp(1))
             setPadding(dp(14), dp(14), dp(14), dp(14))
         }
+        attachDraft(input, "tts")
         panel.addView(input, marginTop(14))
         enginePicker = TextView(this).apply {
             text = "手机系统语音引擎   ›"
@@ -254,6 +255,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             background = shape(p.bg, dp(12), p.border, dp(1))
             setPadding(dp(12), dp(12), dp(12), dp(12))
         }
+        attachDraft(cloneTextInput, "clone.text")
         clonePanel.addView(cloneTextInput, marginTop(12))
         cloneReferenceTextInput = EditText(this).apply {
             hint = "填写参考音频中实际说出的文字（尽量逐字准确）"
@@ -264,6 +266,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             background = shape(p.bg, dp(12), p.border, dp(1))
             setPadding(dp(12), dp(12), dp(12), dp(12))
         }
+        attachDraft(cloneReferenceTextInput, "clone.referenceText")
         clonePanel.addView(cloneReferenceTextInput, marginTop(8))
         clonePanel.addView(secondaryButton("选择参考音频") { chooseCloneReference() }, marginTop(8))
         cloneStatusView = label("尚未选择参考音频。建议使用清晰、无背景音乐的短录音。", 12, p.secondary)
@@ -283,6 +286,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             background = shape(p.bg, dp(12), p.border, dp(1))
             setPadding(dp(12), dp(12), dp(12), dp(12))
         }
+        attachDraft(storyScriptInput, "story.script")
         storyPanel.addView(storyScriptInput, marginTop(12))
         storyRoleANameInput = EditText(this).apply {
             hint = "角色 A 名称"
@@ -353,6 +357,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             background = shape(p.bg, dp(12), p.border, dp(1))
             setPadding(dp(12), dp(12), dp(12), dp(12))
         }
+        attachDraft(musicPromptInput, "music.prompt")
         musicPanel.addView(musicPromptInput, marginTop(12))
         musicDurationInput = EditText(this).apply {
             hint = "生成时长（秒）"
@@ -476,6 +481,17 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         body.addView(label("主题名称与颜色沿用 Yovoice 桌面版主题体系；移动端针对单手操作重新排布。", 12, p.secondary), marginTop(18))
     }
 
+    private fun attachDraft(editText: EditText, key: String) {
+        editText.setText(ProjectStore.loadDraft(this, key))
+        editText.addTextChangedListener(object : android.text.TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
+            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
+            override fun afterTextChanged(s: android.text.Editable?) {
+                ProjectStore.saveDraft(this@MainActivity, key, s?.toString().orEmpty())
+            }
+        })
+    }
+
     private fun saveProjectRecord(title: String, category: String, detail: String, file: File, mime: String) {
         runCatching { ProjectStore.save(this, title, category, detail, file, mime) }
     }
@@ -567,11 +583,14 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                 val loaded = JSONObject(NativeEngine.loadModel(modelFile.absolutePath, model.family, 2))
                 check(loaded.optBoolean("ok")) { loaded.optString("error", "模型加载失败") }
 
-                val output = File(cacheDir, "audio8-preview-${System.currentTimeMillis()}.wav")
+                val projectDir = File(filesDir, "projects")
+                if (!projectDir.exists() && !projectDir.mkdirs()) error("无法创建项目目录")
+                val output = File(projectDir, "audio8-preview-" + System.currentTimeMillis() + ".wav")
                 runOnUiThread { if (!destroyed && ::status.isInitialized) status.text = "模型已加载，正在合成中文语音…" }
                 val result = JSONObject(NativeEngine.synthesize(text, "zh", output.absolutePath, speechRate, speechPitch))
                 check(result.optBoolean("ok")) { result.optString("error", "语音合成失败") }
                 check(output.isFile && output.length() > 44L) { "合成结果文件无效" }
+                saveProjectRecord("Audio8 本地语音", "TTS", text.take(48), output, "audio/wav")
 
                 runOnUiThread {
                     if (!destroyed && !isFinishing) {
@@ -801,6 +820,11 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                 val transcript = result.optString("text").trim()
                 check(transcript.isNotBlank()) { "模型没有返回识别文本" }
                 pendingTextExport = transcript
+                val transcriptDir = File(filesDir, "projects")
+                if (!transcriptDir.exists() && !transcriptDir.mkdirs()) error("无法创建项目目录")
+                val transcriptFile = File(transcriptDir, "transcript-" + System.currentTimeMillis() + ".txt")
+                transcriptFile.writeText(transcript, Charsets.UTF_8)
+                saveProjectRecord("音频转录", "ASR", transcript.take(48), transcriptFile, "text/plain")
                 val segments = result.optJSONArray("segments") ?: org.json.JSONArray()
                 pendingSubtitleSrt = buildSubtitles(segments, result.optInt("sampleRate", 16_000), false)
                 pendingSubtitleVtt = buildSubtitles(segments, result.optInt("sampleRate", 16_000), true)
@@ -893,6 +917,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                 check(result.optBoolean("ok")) { result.optString("error", "声音克隆生成失败") }
                 check(output.isFile && output.length() > 44L) { "克隆语音输出文件无效" }
                 pendingCloneExport = output
+                saveProjectRecord("声音克隆", "克隆语音", text.take(48), output, "audio/wav")
                 runOnUiThread {
                     if (!destroyed && !isFinishing) {
                         cloneStatusView?.text = "声音克隆完成 · " + (output.length() / 1024) + " KB"
@@ -961,6 +986,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                 check(result.optBoolean("ok")) { result.optString("error", "音乐生成失败") }
                 check(output.isFile && output.length() > 44L) { "音乐输出文件无效" }
                 pendingMusicExport = output
+                saveProjectRecord("AI 音乐生成", "音乐", prompt.take(48), output, "audio/wav")
                 runOnUiThread {
                     if (!destroyed && !isFinishing) {
                         musicStatusView?.text = "音乐生成完成 · " + (output.length() / 1024) + " KB"
@@ -1015,6 +1041,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                             val item = stems.getJSONObject(index)
                             val name = item.optString("name", "Stem " + (index + 1))
                             val file = File(item.getString("path"))
+                            saveProjectRecord(name + " 分离音轨", "音轨分离", "HTDemucs 六轨", file, "audio/wav")
                             val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
                             row.addView(label(name, 13, p.text, true), LinearLayout.LayoutParams(0, dp(48), 1f))
                             row.addView(textButton("试听", 12) { playAudio(Uri.fromFile(file)) }, LinearLayout.LayoutParams(dp(60), dp(42)))
@@ -1067,6 +1094,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                 check(result.optBoolean("ok")) { result.optString("error", "音频转 MIDI 失败") }
                 check(output.isFile && output.length() > 20L) { "MIDI 输出文件无效" }
                 pendingMidiExport = output
+                saveProjectRecord("音频转 MIDI", "MIDI", instruments.ifBlank { "MuScriptor Small" }, output, "audio/midi")
                 runOnUiThread { if (!destroyed && !isFinishing) midiStatusView?.text = "MIDI 转换完成 · " + (output.length() / 1024) + " KB" }
             } catch (error: Throwable) {
                 runOnUiThread {
@@ -1283,6 +1311,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                 val output = File(outputDir, "story-dubbing.wav")
                 WavJoiner.join(clips, output, 220)
                 pendingStoryExport = output
+                saveProjectRecord("多角色故事配音", "故事配音", lines.size.toString() + " 句", output, "audio/wav")
                 runOnUiThread {
                     if (!destroyed && !isFinishing) {
                         storyStatusView?.text = "多角色故事配音完成 · " + lines.size + " 句"
