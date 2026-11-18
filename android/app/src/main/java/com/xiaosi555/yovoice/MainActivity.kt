@@ -62,6 +62,15 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     private var cloneReferenceUri: Uri? = null
     private var cloneStatusView: TextView? = null
     private var pendingCloneExport: File? = null
+    private lateinit var storyScriptInput: EditText
+    private lateinit var storyRoleANameInput: EditText
+    private lateinit var storyRoleATextInput: EditText
+    private lateinit var storyRoleBNameInput: EditText
+    private lateinit var storyRoleBTextInput: EditText
+    private var storyRoleAUri: Uri? = null
+    private var storyRoleBUri: Uri? = null
+    private var storyStatusView: TextView? = null
+    private var pendingStoryExport: File? = null
     private lateinit var musicPromptInput: EditText
     private lateinit var musicDurationInput: EditText
     private var musicStatusView: TextView? = null
@@ -260,6 +269,65 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         clonePanel.addView(primaryButton("生成克隆语音") { cloneVoice() }, marginTop(10))
         clonePanel.addView(secondaryButton("导出克隆语音 WAV") { exportCloneAudio() }, marginTop(8))
         body.addView(clonePanel, marginTop(10))
+
+        val storyPanel = card()
+        storyPanel.addView(section("故事配音", "多角色分句克隆 · 每行使用“角色名：台词”格式"))
+        storyScriptInput = EditText(this).apply {
+            hint = "角色A：故事从这里开始……\n角色B：我来回答你。\n角色A：我们继续前进。"
+            minLines = 5
+            gravity = Gravity.TOP
+            textSize = 14f
+            setTextColor(p.text); setHintTextColor(p.secondary)
+            background = shape(p.bg, dp(12), p.border, dp(1))
+            setPadding(dp(12), dp(12), dp(12), dp(12))
+        }
+        storyPanel.addView(storyScriptInput, marginTop(12))
+        storyRoleANameInput = EditText(this).apply {
+            hint = "角色 A 名称"
+            setText("角色A")
+            textSize = 14f
+            setTextColor(p.text); setHintTextColor(p.secondary)
+            background = shape(p.bg, dp(12), p.border, dp(1))
+            setPadding(dp(12), dp(10), dp(12), dp(10))
+        }
+        storyPanel.addView(storyRoleANameInput, marginTop(10))
+        storyRoleATextInput = EditText(this).apply {
+            hint = "角色 A 参考录音的准确文字"
+            minLines = 2
+            gravity = Gravity.TOP
+            textSize = 13f
+            setTextColor(p.text); setHintTextColor(p.secondary)
+            background = shape(p.bg, dp(12), p.border, dp(1))
+            setPadding(dp(12), dp(10), dp(12), dp(10))
+        }
+        storyPanel.addView(storyRoleATextInput, marginTop(6))
+        storyPanel.addView(secondaryButton("选择角色 A 参考音频") { chooseStoryReference(1) }, marginTop(6))
+        storyRoleBNameInput = EditText(this).apply {
+            hint = "角色 B 名称"
+            setText("角色B")
+            textSize = 14f
+            setTextColor(p.text); setHintTextColor(p.secondary)
+            background = shape(p.bg, dp(12), p.border, dp(1))
+            setPadding(dp(12), dp(10), dp(12), dp(10))
+        }
+        storyPanel.addView(storyRoleBNameInput, marginTop(12))
+        storyRoleBTextInput = EditText(this).apply {
+            hint = "角色 B 参考录音的准确文字"
+            minLines = 2
+            gravity = Gravity.TOP
+            textSize = 13f
+            setTextColor(p.text); setHintTextColor(p.secondary)
+            background = shape(p.bg, dp(12), p.border, dp(1))
+            setPadding(dp(12), dp(10), dp(12), dp(10))
+        }
+        storyPanel.addView(storyRoleBTextInput, marginTop(6))
+        storyPanel.addView(secondaryButton("选择角色 B 参考音频") { chooseStoryReference(2) }, marginTop(6))
+        storyStatusView = label("为每个角色选择清晰参考录音并填写准确转录。", 12, p.secondary)
+        storyPanel.addView(storyStatusView, marginTop(8))
+        storyPanel.addView(primaryButton("生成多角色故事配音") { generateStoryDubbing() }, marginTop(10))
+        storyPanel.addView(secondaryButton("导出故事配音 WAV") { exportStoryDubbing() }, marginTop(8))
+        body.addView(storyPanel, marginTop(10))
+
         body.addView(toolRow("音频 / 视频转文字", "使用本地 Qwen3 ASR 识别音轨，支持常见音频与视频容器") { chooseAsrMedia() }, marginTop(10))
         asrStatusView = label("尚未选择待识别的音频或视频文件。", 12, p.secondary)
         body.addView(asrStatusView, marginTop(8))
@@ -582,6 +650,15 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                     cloneReferenceUri = uri
                     cloneStatusView?.text = "参考音频已选择，可以生成克隆语音。"
                 }
+                REQUEST_STORY_ROLE_A -> {
+                    storyRoleAUri = uri
+                    storyStatusView?.text = "角色 A 参考音频已选择。"
+                }
+                REQUEST_STORY_ROLE_B -> {
+                    storyRoleBUri = uri
+                    storyStatusView?.text = "角色 B 参考音频已选择。"
+                }
+                REQUEST_EXPORT_STORY -> copyExport(uri, pendingStoryExport, "故事配音已导出")
                 REQUEST_STEM_MEDIA -> {
                     stemAudioUri = uri
                     stemStatusView?.text = "已选择音乐文件，可以开始六轨分离。"
@@ -1067,6 +1144,115 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         return String.format(java.util.Locale.US, "%02d:%02d:%02d%s%03d", hours, minutes, seconds, separator, fraction)
     }
 
+    private data class StoryLine(val speaker: String, val text: String)
+
+    private fun chooseStoryReference(role: Int) {
+        val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+            addCategory(Intent.CATEGORY_OPENABLE)
+            type = "audio/*"
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION)
+        }
+        startActivityForResult(intent, if (role == 1) REQUEST_STORY_ROLE_A else REQUEST_STORY_ROLE_B)
+    }
+
+    private fun exportStoryDubbing() {
+        launchFileExport(pendingStoryExport, "audio/wav", "yovoice-story-dubbing.wav", REQUEST_EXPORT_STORY)
+    }
+
+    private fun generateStoryDubbing() {
+        val script = storyScriptInput.text?.toString().orEmpty()
+        val roleAName = storyRoleANameInput.text?.toString()?.trim().orEmpty()
+        val roleBName = storyRoleBNameInput.text?.toString()?.trim().orEmpty()
+        val roleAText = storyRoleATextInput.text?.toString()?.trim().orEmpty()
+        val roleBText = storyRoleBTextInput.text?.toString()?.trim().orEmpty()
+        val roleAUri = storyRoleAUri
+        val roleBUri = storyRoleBUri
+        if (script.isBlank() || roleAName.isBlank() || roleBName.isBlank() || roleAName == roleBName) {
+            Toast.makeText(this, "请填写故事脚本，并为两个角色设置不同名称", Toast.LENGTH_LONG).show()
+            return
+        }
+        val lines = script.lines().mapNotNull { raw ->
+            val line = raw.trim()
+            if (line.isEmpty()) null else {
+                val split = line.indexOfAny(charArrayOf('：', ':'))
+                if (split <= 0) StoryLine(roleAName, line)
+                else StoryLine(line.substring(0, split).trim(), line.substring(split + 1).trim())
+            }
+        }.filter { it.text.isNotBlank() }
+        if (lines.isEmpty()) {
+            Toast.makeText(this, "故事脚本中没有可配音的台词", Toast.LENGTH_SHORT).show()
+            return
+        }
+        if (lines.any { it.speaker != roleAName && it.speaker != roleBName }) {
+            Toast.makeText(this, "脚本中的角色名必须与角色 A / B 名称完全一致", Toast.LENGTH_LONG).show()
+            return
+        }
+        if (lines.any { it.speaker == roleAName } && (roleAUri == null || roleAText.isBlank())) {
+            Toast.makeText(this, "请为角色 A 选择参考音频并填写参考文本", Toast.LENGTH_LONG).show()
+            return
+        }
+        if (lines.any { it.speaker == roleBName } && (roleBUri == null || roleBText.isBlank())) {
+            Toast.makeText(this, "请为角色 B 选择参考音频并填写参考文本", Toast.LENGTH_LONG).show()
+            return
+        }
+        if (nativeBusy) return
+        val model = ModelCatalog.load(this).firstOrNull { it.id == "audio8-tts-0.6b-q8" }
+        if (model == null) {
+            Toast.makeText(this, "模型目录中没有 Audio8 TTS 模型", Toast.LENGTH_LONG).show()
+            return
+        }
+        nativeBusy = true
+        storyStatusView?.text = "正在准备多角色配音模型…"
+        nativeExecutor.execute {
+            try {
+                check(ModelCatalog.isInstalled(this, model)) { "请先下载 Audio8 TTS Realistic 0.6B Q8 模型（约 1.43 GB）" }
+                val root = ModelCatalog.installedDirectory(this, model.id)
+                val modelFile = File(root, model.localRelativePath(model.remotePath))
+                check(modelFile.isFile) { "Audio8 TTS 模型文件不存在" }
+                val loaded = JSONObject(NativeEngine.loadTaskModel(modelFile.absolutePath, model.family, "clon", "offline"))
+                check(loaded.optBoolean("ok")) { loaded.optString("error", "故事配音模型加载失败") }
+                val pcmA = if (lines.any { it.speaker == roleAName }) AndroidAudioDecoder.decodeTo16kMono(this, roleAUri!!, 30) else null
+                val pcmB = if (lines.any { it.speaker == roleBName }) AndroidAudioDecoder.decodeTo16kMono(this, roleBUri!!, 30) else null
+                val outputDir = File(filesDir, "story-dubbing/story-" + System.currentTimeMillis())
+                if (!outputDir.exists() && !outputDir.mkdirs()) error("无法创建故事配音目录")
+                val clips = mutableListOf<File>()
+                lines.forEachIndexed { index, line ->
+                    val referencePcm = if (line.speaker == roleAName) pcmA!! else pcmB!!
+                    val referenceText = if (line.speaker == roleAName) roleAText else roleBText
+                    val clip = File(outputDir, "line-" + (index + 1).toString().padStart(3, '0') + ".wav")
+                    val result = JSONObject(NativeEngine.cloneVoice(
+                        line.text, referenceText, referencePcm, 16_000, 1, clip.absolutePath
+                    ))
+                    check(result.optBoolean("ok")) {
+                        "第 " + (index + 1) + " 句生成失败：" + result.optString("error", "未知错误")
+                    }
+                    check(clip.isFile && clip.length() > 44L) { "第 " + (index + 1) + " 句没有生成有效音频" }
+                    clips.add(clip)
+                    runOnUiThread {
+                        if (!destroyed && !isFinishing) storyStatusView?.text =
+                            "正在生成故事配音 · " + (index + 1) + " / " + lines.size + " 句"
+                    }
+                }
+                val output = File(outputDir, "story-dubbing.wav")
+                WavJoiner.join(clips, output, 220)
+                pendingStoryExport = output
+                runOnUiThread {
+                    if (!destroyed && !isFinishing) {
+                        storyStatusView?.text = "多角色故事配音完成 · " + lines.size + " 句"
+                        playAudio(Uri.fromFile(output))
+                    }
+                }
+            } catch (error: Throwable) {
+                runOnUiThread {
+                    if (!destroyed && !isFinishing) storyStatusView?.text =
+                        "故事配音失败：" + (error.localizedMessage ?: error.javaClass.simpleName)
+                }
+            } finally {
+                nativeBusy = false
+            }
+        }
+    }
+
     private fun playAudio(uri: Uri) {
         releasePlayer()
         try {
@@ -1128,6 +1314,9 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         private const val REQUEST_EXPORT_TXT = 4104
         private const val REQUEST_EXPORT_SRT = 4112
         private const val REQUEST_EXPORT_VTT = 4113
+        private const val REQUEST_STORY_ROLE_A = 4114
+        private const val REQUEST_STORY_ROLE_B = 4115
+        private const val REQUEST_EXPORT_STORY = 4116
         private const val REQUEST_CLONE_REFERENCE = 4105
         private const val REQUEST_EXPORT_CLONE = 4106
         private const val REQUEST_STEM_MEDIA = 4107
