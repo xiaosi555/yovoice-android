@@ -70,6 +70,8 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     private lateinit var midiInstrumentInput: EditText
     private var pendingMidiExport: File? = null
     private var pendingGenericExport: File? = null
+    private var stemAudioUri: Uri? = null
+    private var midiAudioUri: Uri? = null
 
     private data class Palette(val name: String, val bg: Int, val surface: Int, val text: Int, val secondary: Int, val accent: Int, val border: Int, val dark: Boolean)
     private val palettes = listOf(
@@ -576,17 +578,23 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                     cloneReferenceUri = uri
                     cloneStatusView?.text = "参考音频已选择，可以生成克隆语音。"
                 }
+                REQUEST_STEM_MEDIA -> {
+                    stemAudioUri = uri
+                    stemStatusView?.text = "已选择音乐文件，可以开始六轨分离。"
+                }
+                REQUEST_MIDI_MEDIA -> {
+                    midiAudioUri = uri
+                    midiStatusView?.text = "已选择音乐文件，可以开始转换 MIDI。"
+                }
                 REQUEST_EXPORT_TXT -> runCatching {
                     contentResolver.openOutputStream(uri)?.bufferedWriter(Charsets.UTF_8)?.use { it.write(pendingTextExport) }
                         ?: error("无法创建导出文件")
                 }.onSuccess { Toast.makeText(this, "识别文本已导出", Toast.LENGTH_SHORT).show() }
                     .onFailure { Toast.makeText(this, "导出失败：" + (it.localizedMessage ?: "未知错误"), Toast.LENGTH_LONG).show() }
-                REQUEST_EXPORT_CLONE -> runCatching {
-                    val source = pendingCloneExport ?: error("没有可导出的克隆音频")
-                    contentResolver.openOutputStream(uri)?.use { output -> source.inputStream().use { it.copyTo(output) } }
-                        ?: error("无法创建导出文件")
-                }.onSuccess { Toast.makeText(this, "克隆语音已导出", Toast.LENGTH_SHORT).show() }
-                    .onFailure { Toast.makeText(this, "音频导出失败：" + (it.localizedMessage ?: "未知错误"), Toast.LENGTH_LONG).show() }
+                REQUEST_EXPORT_CLONE -> copyExport(uri, pendingCloneExport, "克隆语音已导出")
+                REQUEST_EXPORT_MUSIC -> copyExport(uri, pendingMusicExport, "生成音乐已导出")
+                REQUEST_EXPORT_MIDI -> copyExport(uri, pendingMidiExport, "MIDI 文件已导出")
+                REQUEST_EXPORT_GENERIC -> copyExport(uri, pendingGenericExport, "音轨文件已导出")
             }
         }
     }
@@ -766,6 +774,203 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         }
     }
 
+    private fun chooseStemAudio() {
+        val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+            addCategory(Intent.CATEGORY_OPENABLE)
+            type = "audio/*"
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION)
+        }
+        startActivityForResult(intent, REQUEST_STEM_MEDIA)
+    }
+
+    private fun chooseMidiAudio() {
+        val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+            addCategory(Intent.CATEGORY_OPENABLE)
+            type = "audio/*"
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION)
+        }
+        startActivityForResult(intent, REQUEST_MIDI_MEDIA)
+    }
+
+    private fun generateMusic() {
+        val prompt = musicPromptInput.text?.toString()?.trim().orEmpty()
+        val duration = musicDurationInput.text?.toString()?.trim().orEmpty().toFloatOrNull()
+        if (prompt.isBlank() || duration == null || duration !in 1f..120f) {
+            Toast.makeText(this, "请填写音乐描述，并将时长设置为 1–120 秒", Toast.LENGTH_LONG).show()
+            return
+        }
+        if (nativeBusy) return
+        val model = ModelCatalog.load(this).firstOrNull { it.id == "stable-audio-3-small-music-q8" }
+        if (model == null) {
+            Toast.makeText(this, "模型目录中没有 Stable Audio 音乐模型", Toast.LENGTH_LONG).show()
+            return
+        }
+        nativeBusy = true
+        musicStatusView?.text = "正在校验 Stable Audio 模型…"
+        nativeExecutor.execute {
+            try {
+                check(ModelCatalog.isInstalled(this, model)) { "请先下载 Stable Audio 3 Small Music Q8 模型（约 1.68 GB）" }
+                val modelFile = File(ModelCatalog.installedDirectory(this, model.id), model.localRelativePath(model.remotePath))
+                check(modelFile.isFile) { "音乐模型文件不存在，请重新下载" }
+                val loaded = JSONObject(NativeEngine.loadTaskModel(modelFile.absolutePath, model.family, "gen", "offline"))
+                check(loaded.optBoolean("ok")) { loaded.optString("error", "音乐模型加载失败") }
+                runOnUiThread { if (!destroyed && !isFinishing) musicStatusView?.text = "模型已加载，正在生成音乐…" }
+                val outputDir = File(filesDir, "music")
+                if (!outputDir.exists() && !outputDir.mkdirs()) error("无法创建音乐输出目录")
+                val output = File(outputDir, "music-" + System.currentTimeMillis() + ".wav")
+                val result = JSONObject(NativeEngine.generateMusic(prompt, output.absolutePath, duration.toString(), "8", "1", ""))
+                check(result.optBoolean("ok")) { result.optString("error", "音乐生成失败") }
+                check(output.isFile && output.length() > 44L) { "音乐输出文件无效" }
+                pendingMusicExport = output
+                runOnUiThread {
+                    if (!destroyed && !isFinishing) {
+                        musicStatusView?.text = "音乐生成完成 · " + (output.length() / 1024) + " KB"
+                        playAudio(Uri.fromFile(output))
+                    }
+                }
+            } catch (error: Throwable) {
+                runOnUiThread {
+                    if (!destroyed && !isFinishing) musicStatusView?.text =
+                        "生成失败：" + (error.localizedMessage ?: error.javaClass.simpleName)
+                }
+            } finally {
+                nativeBusy = false
+            }
+        }
+    }
+
+    private fun separateAudio() {
+        val uri = stemAudioUri
+        if (uri == null) {
+            Toast.makeText(this, "请先选择待分离的音乐文件", Toast.LENGTH_SHORT).show()
+            return
+        }
+        if (nativeBusy) return
+        val model = ModelCatalog.load(this).firstOrNull { it.id == "htdemucs-6stems-q8" }
+        if (model == null) {
+            Toast.makeText(this, "模型目录中没有 HTDemucs 六轨模型", Toast.LENGTH_LONG).show()
+            return
+        }
+        nativeBusy = true
+        stemStatusView?.text = "正在校验 HTDemucs 模型…"
+        stemResultsContainer?.removeAllViews()
+        nativeExecutor.execute {
+            try {
+                check(ModelCatalog.isInstalled(this, model)) { "请先下载 HTDemucs 6-stem Q8 模型（约 42 MB）" }
+                runOnUiThread { if (!destroyed && !isFinishing) stemStatusView?.text = "正在解码并转换为 44.1 kHz 立体声…" }
+                val pcm = AndroidAudioDecoder.decodeToPcm(this, uri, 44_100, 2, 180)
+                val modelFile = File(ModelCatalog.installedDirectory(this, model.id), model.localRelativePath(model.remotePath))
+                check(modelFile.isFile) { "六轨模型文件不存在，请重新下载" }
+                val loaded = JSONObject(NativeEngine.loadTaskModel(modelFile.absolutePath, model.family, "sep", "offline"))
+                check(loaded.optBoolean("ok")) { loaded.optString("error", "音轨分离模型加载失败") }
+                runOnUiThread { if (!destroyed && !isFinishing) stemStatusView?.text = "模型已加载，正在分离六条音轨…" }
+                val outputDir = File(filesDir, "stems/stems-" + System.currentTimeMillis())
+                val result = JSONObject(NativeEngine.separateStems(pcm, 44_100, 2, outputDir.absolutePath))
+                check(result.optBoolean("ok")) { result.optString("error", "音轨分离失败") }
+                val stems = result.getJSONArray("stems")
+                check(stems.length() > 0) { "模型没有返回音轨" }
+                runOnUiThread {
+                    if (!destroyed && !isFinishing) {
+                        stemResultsContainer?.removeAllViews()
+                        for (index in 0 until stems.length()) {
+                            val item = stems.getJSONObject(index)
+                            val name = item.optString("name", "Stem " + (index + 1))
+                            val file = File(item.getString("path"))
+                            val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+                            row.addView(label(name, 13, p.text, true), LinearLayout.LayoutParams(0, dp(48), 1f))
+                            row.addView(textButton("试听", 12) { playAudio(Uri.fromFile(file)) }, LinearLayout.LayoutParams(dp(60), dp(42)))
+                            row.addView(textButton("导出", 12) { launchFileExport(file, "audio/wav", file.name, REQUEST_EXPORT_GENERIC) }, LinearLayout.LayoutParams(dp(60), dp(42)))
+                            stemResultsContainer?.addView(row)
+                        }
+                        stemStatusView?.text = "六轨分离完成 · " + stems.length() + " 条音轨"
+                    }
+                }
+            } catch (error: Throwable) {
+                runOnUiThread {
+                    if (!destroyed && !isFinishing) stemStatusView?.text =
+                        "分离失败：" + (error.localizedMessage ?: error.javaClass.simpleName)
+                }
+            } finally {
+                nativeBusy = false
+            }
+        }
+    }
+
+    private fun convertToMidi() {
+        val uri = midiAudioUri
+        if (uri == null) {
+            Toast.makeText(this, "请先选择待转换的音乐文件", Toast.LENGTH_SHORT).show()
+            return
+        }
+        if (nativeBusy) return
+        val model = ModelCatalog.load(this).firstOrNull { it.id == "muscriptor-small-f32" }
+        if (model == null) {
+            Toast.makeText(this, "模型目录中没有 MuScriptor 模型", Toast.LENGTH_LONG).show()
+            return
+        }
+        nativeBusy = true
+        midiStatusView?.text = "正在校验 MuScriptor 模型…"
+        nativeExecutor.execute {
+            try {
+                check(ModelCatalog.isInstalled(this, model)) { "请先下载 MuScriptor Small F32 模型（约 412 MB）" }
+                runOnUiThread { if (!destroyed && !isFinishing) midiStatusView?.text = "正在解码音乐并转换为 44.1 kHz 立体声…" }
+                val pcm = AndroidAudioDecoder.decodeToPcm(this, uri, 44_100, 2, 180)
+                val modelFile = File(ModelCatalog.installedDirectory(this, model.id), model.localRelativePath(model.remotePath))
+                check(modelFile.isFile) { "MuScriptor 模型文件不存在，请重新下载" }
+                val loaded = JSONObject(NativeEngine.loadTaskModel(modelFile.absolutePath, model.family, "midi", "offline"))
+                check(loaded.optBoolean("ok")) { loaded.optString("error", "MIDI 模型加载失败") }
+                runOnUiThread { if (!destroyed && !isFinishing) midiStatusView?.text = "模型已加载，正在提取音符事件…" }
+                val outputDir = File(filesDir, "midi")
+                if (!outputDir.exists() && !outputDir.mkdirs()) error("无法创建 MIDI 输出目录")
+                val output = File(outputDir, "transcription-" + System.currentTimeMillis() + ".mid")
+                val instruments = midiInstrumentInput.text?.toString()?.trim().orEmpty()
+                val result = JSONObject(NativeEngine.transcribeToMidi(pcm, 44_100, 2, output.absolutePath, instruments))
+                check(result.optBoolean("ok")) { result.optString("error", "音频转 MIDI 失败") }
+                check(output.isFile && output.length() > 20L) { "MIDI 输出文件无效" }
+                pendingMidiExport = output
+                runOnUiThread { if (!destroyed && !isFinishing) midiStatusView?.text = "MIDI 转换完成 · " + (output.length() / 1024) + " KB" }
+            } catch (error: Throwable) {
+                runOnUiThread {
+                    if (!destroyed && !isFinishing) midiStatusView?.text =
+                        "转换失败：" + (error.localizedMessage ?: error.javaClass.simpleName)
+                }
+            } finally {
+                nativeBusy = false
+            }
+        }
+    }
+
+    private fun exportMusic() {
+        launchFileExport(pendingMusicExport, "audio/wav", "yovoice-generated-music.wav", REQUEST_EXPORT_MUSIC)
+    }
+
+    private fun exportMidi() {
+        launchFileExport(pendingMidiExport, "audio/midi", "yovoice-transcription.mid", REQUEST_EXPORT_MIDI)
+    }
+
+    private fun launchFileExport(file: File?, mime: String, title: String, requestCode: Int) {
+        if (file == null || !file.isFile) {
+            Toast.makeText(this, "请先完成对应的生成或处理任务", Toast.LENGTH_SHORT).show()
+            return
+        }
+        if (requestCode == REQUEST_EXPORT_GENERIC) pendingGenericExport = file
+        val intent = Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
+            addCategory(Intent.CATEGORY_OPENABLE)
+            type = mime
+            putExtra(Intent.EXTRA_TITLE, title)
+        }
+        startActivityForResult(intent, requestCode)
+    }
+
+    private fun copyExport(uri: Uri, source: File?, successMessage: String) {
+        runCatching {
+            val file = source ?: error("没有可导出的文件")
+            contentResolver.openOutputStream(uri)?.use { output -> file.inputStream().use { it.copyTo(output) } }
+                ?: error("无法创建导出文件")
+        }.onSuccess { Toast.makeText(this, successMessage, Toast.LENGTH_SHORT).show() }
+            .onFailure { Toast.makeText(this, "导出失败：" + (it.localizedMessage ?: "未知错误"), Toast.LENGTH_LONG).show() }
+    }
+
     private fun playAudio(uri: Uri) {
         releasePlayer()
         try {
@@ -827,5 +1032,10 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         private const val REQUEST_EXPORT_TXT = 4104
         private const val REQUEST_CLONE_REFERENCE = 4105
         private const val REQUEST_EXPORT_CLONE = 4106
+        private const val REQUEST_STEM_MEDIA = 4107
+        private const val REQUEST_MIDI_MEDIA = 4108
+        private const val REQUEST_EXPORT_MUSIC = 4109
+        private const val REQUEST_EXPORT_MIDI = 4110
+        private const val REQUEST_EXPORT_GENERIC = 4111
     }
 }
