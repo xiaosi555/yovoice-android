@@ -208,7 +208,7 @@ Java_com_xiaosi555_yovoice_NativeEngine_nativeLoadModel(
         return make_string(env, failure_json("模型路径或模型家族为空"));
     }
     if ((task_value != "tts" && task_value != "asr" && task_value != "clon" && task_value != "gen" && task_value != "sep" && task_value != "midi") || mode_value != "offline") {
-        return make_string(env, failure_json("当前 Android 原生运行时仅开放离线 TTS、ASR 与声音克隆"));
+        return make_string(env, failure_json("当前 Android 原生运行时仅开放离线 TTS、ASR、声音克隆、音乐生成、音轨分离与 MIDI"));
     }
 
     std::lock_guard<std::mutex> lock(g_mutex);
