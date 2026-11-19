@@ -31,6 +31,12 @@ class ModelEntryTest {
     )
 
     @Test
+    fun catalogFamilyMapsToNativeLoaderFamilyWhenNamesDiffer() {
+        assertEquals("htdemucs", model().copy(family = "htdemucs_6stems").nativeFamily())
+        assertEquals("audio8_tts", model().copy(family = "audio8_tts").nativeFamily())
+    }
+
+    @Test
     fun singleFilePackageIsDownloadableOnlyWithTrustedChecksum() {
         assertTrue(model().isDownloadable())
         val missingChecksum = model().copy(sha256 = "")
