@@ -57,6 +57,9 @@ class MainActivity : AppCompatActivity() {
     private var tts: TextToSpeech? = null
     private var ttsReady = false
     private var player: MediaPlayer? = null
+    private var playerDialog: AlertDialog? = null
+    private var playerPaused = false
+    private var playerPauseAction: TextView? = null
     private var destroyed = false
     @Volatile private var nativeBusy = false
     private val nativeExecutor = Executors.newSingleThreadExecutor()
@@ -1359,8 +1362,18 @@ class MainActivity : AppCompatActivity() {
 
         val storageCard = card()
         storageCard.addView(section("本地存储", "模型文件、生成作品和应用剩余可用空间。"))
-        val modelDir = File(filesDir, "models")
-        val storageInfo = label("正在统计手机内的模型与作品文件…", 12, p.secondary)
+        val modelDir = ModelCatalog.modelsDirectory(this)
+        val storageInfo = label("正在统计手机内的模型与作品文件…", 12, p.secondary).apply {
+            setPadding(dp(2), dp(5), dp(2), dp(5))
+            isClickable = true
+            isFocusable = true
+            contentDescription = "点击复制模型存储路径"
+        }
+        storageInfo.setOnClickListener {
+            val clipboard = getSystemService(CLIPBOARD_SERVICE) as android.content.ClipboardManager
+            clipboard.setPrimaryClip(android.content.ClipData.newPlainText("Yovoice 模型存储路径", modelDir.absolutePath))
+            Toast.makeText(this, "模型路径已复制", Toast.LENGTH_SHORT).show()
+        }
         storageCard.addView(storageInfo, marginTop(5))
         storageExecutor.execute {
             val modelBytes = directoryBytes(modelDir)
@@ -1368,7 +1381,7 @@ class MainActivity : AppCompatActivity() {
             val freeBytes = runCatching { android.os.StatFs(filesDir.absolutePath).availableBytes }.getOrDefault(0L)
             runOnUiThread {
                 if (!destroyed && !isFinishing && !isDestroyed) {
-                    storageInfo.text = "模型：${formatStorage(modelBytes)} · 作品：${formatStorage(projectBytes)}\n应用可用空间：${formatStorage(freeBytes)}\n模型目录：${modelDir.absolutePath}"
+                    storageInfo.text = "模型：${formatStorage(modelBytes)} · 作品：${formatStorage(projectBytes)}\n应用可用空间：${formatStorage(freeBytes)}\n模型目录（点击复制）：\n${modelDir.absolutePath}"
                 }
             }
         }
@@ -1598,7 +1611,7 @@ class MainActivity : AppCompatActivity() {
         background = ripple(p.surface, dp(14), p.border)
         setOnClickListener { animatePress(this, action) }
         val iconWrap = FrameLayout(this@MainActivity).apply {
-            background = shape(Color.argb(if (p.dark) 38 else 22, Color.red(p.accent), Color.green(p.accent), Color.blue(p.accent)), dp(12))
+            setBackgroundColor(Color.TRANSPARENT)
             addView(LineIconView(this@MainActivity, icon, p.accent), FrameLayout.LayoutParams(dp(23), dp(23), Gravity.CENTER))
         }
         addView(iconWrap, LinearLayout.LayoutParams(dp(40), dp(40)))
@@ -2766,14 +2779,88 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun playAudio(uri: Uri) {
+        // New playback replaces the previous track and its mini-player.
         releasePlayer()
         try {
             player = MediaPlayer().apply {
-                setOnPreparedListener { if (!destroyed) it.start() else it.release() }
-                setOnErrorListener { _, _, _ -> Toast.makeText(this@MainActivity, "音频格式暂不支持", Toast.LENGTH_SHORT).show(); true }
-                setDataSource(this@MainActivity, uri); prepareAsync()
+                setOnPreparedListener {
+                    if (destroyed) it.release() else {
+                        showPlayerMiniWindow()
+                        it.start()
+                        playerPaused = false
+                        playerPauseAction?.text = "暂停"
+                    }
+                }
+                setOnCompletionListener {
+                    releasePlayer()
+                    if (::status.isInitialized) status.text = "音频播放完成"
+                }
+                setOnErrorListener { _, _, _ ->
+                    releasePlayer()
+                    Toast.makeText(this@MainActivity, "音频格式暂不支持", Toast.LENGTH_SHORT).show()
+                    true
+                }
+                setDataSource(this@MainActivity, uri)
+                prepareAsync()
             }
-        } catch (e: Exception) { releasePlayer(); Toast.makeText(this, "无法打开音频：${e.localizedMessage}", Toast.LENGTH_LONG).show() }
+        } catch (e: Exception) {
+            releasePlayer()
+            Toast.makeText(this, "无法打开音频：${e.localizedMessage}", Toast.LENGTH_LONG).show()
+        }
+    }
+
+    private fun showPlayerMiniWindow() {
+        val panel = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(20), dp(12), dp(20), dp(8))
+        }
+        panel.addView(label("正在播放音频", 16, p.text, true))
+        panel.addView(label("新音频将自动替换当前播放内容", 12, p.secondary), marginTop(4))
+        val actions = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        val pause = TextView(this).apply {
+            text = "暂停"
+            gravity = Gravity.CENTER
+            textSize = 14f
+            setTextColor(p.accent)
+            setPadding(dp(18), dp(12), dp(18), dp(12))
+            background = ripple(p.surface, dp(12))
+            isClickable = true
+            isFocusable = true
+            setOnClickListener {
+                val current = player ?: return@setOnClickListener
+                if (runCatching { current.isPlaying }.getOrDefault(false)) {
+                    runCatching { current.pause() }
+                    playerPaused = true
+                    text = "继续播放"
+                } else if (playerPaused) {
+                    runCatching { current.start() }
+                    playerPaused = false
+                    text = "暂停"
+                }
+            }
+        }
+        playerPauseAction = pause
+        actions.addView(pause, LinearLayout.LayoutParams(0, dp(48), 1f))
+        val cancel = TextView(this).apply {
+            text = "取消播放"
+            gravity = Gravity.CENTER
+            textSize = 14f
+            setTextColor(p.secondary)
+            setPadding(dp(18), dp(12), dp(18), dp(12))
+            background = ripple(p.surface, dp(12))
+            isClickable = true
+            isFocusable = true
+            setOnClickListener { releasePlayer() }
+        }
+        actions.addView(cancel, LinearLayout.LayoutParams(0, dp(48), 1f).apply { leftMargin = dp(8) })
+        panel.addView(actions, marginTop(10))
+        playerDialog = AlertDialog.Builder(this).setView(panel).setCancelable(true).create().also { dialog ->
+            dialog.setOnCancelListener { releasePlayer() }
+            dialog.show()
+        }
     }
     private fun onProviderInit(token: Int, result: Int) {
         runOnUiThread {
@@ -2850,9 +2937,25 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showVoiceSearchDialog() {
+        if (activeTtsEngineId.startsWith("native:")) {
+            AlertDialog.Builder(this)
+                .setTitle("本地引擎音色")
+                .setMessage("Audio8 使用模型内置的音色条件，不通过 Android 系统音色列表切换。当前版本使用模型默认音色；如需自定义声音，可进入声音克隆并导入参考音频。")
+                .setPositiveButton("知道了", null)
+                .setNeutralButton("查看模型") { _, _ -> showModelPicker("tts") }
+                .show()
+            return
+        }
+        refreshSystemVoices()
         val voices = availableTtsVoices
         if (voices.isEmpty()) {
-            Toast.makeText(this, "当前引擎尚未提供可选音色，请先确认引擎已连接并安装中文语音数据。", Toast.LENGTH_LONG).show()
+            AlertDialog.Builder(this)
+                .setTitle("当前没有可选音色")
+                .setMessage("所选引擎尚未向 Android 提供音色列表。请确认引擎已完成初始化并安装中文语音数据，或切换手机系统语音引擎。")
+                .setPositiveButton("重新读取") { _, _ -> refreshSystemVoices(); showVoiceSearchDialog() }
+                .setNeutralButton("语音设置") { _, _ -> launchTtsSettings() }
+                .setNegativeButton("关闭", null)
+                .show()
             return
         }
         val container = LinearLayout(this).apply {
@@ -2981,7 +3084,16 @@ class MainActivity : AppCompatActivity() {
             voicePicker.text = "当前引擎未提供可选音色"
         }
     }
-    private fun releasePlayer() { runCatching { player?.stop() }; runCatching { player?.release() }; player = null }
+    private fun releasePlayer() {
+        val dialog = playerDialog
+        playerDialog = null
+        runCatching { dialog?.setOnCancelListener(null); dialog?.dismiss() }
+        runCatching { player?.stop() }
+        runCatching { player?.release() }
+        player = null
+        playerPaused = false
+        playerPauseAction = null
+    }
     override fun onDestroy() {
         destroyed = true; ++ttsGeneration; releasePlayer()
         runCatching {
