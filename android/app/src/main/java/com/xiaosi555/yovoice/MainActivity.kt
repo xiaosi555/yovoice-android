@@ -216,18 +216,21 @@ class MainActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
-        if (!pendingMultiTtsReturn) return
-        pendingMultiTtsReturn = false
-        val provider = TtsProviderRegistry.discover(this).firstOrNull {
-            it.packageName.equals("org.nobody.multitts", ignoreCase = true) ||
-                it.label.contains("MultiTTS", ignoreCase = true)
+        if (pendingMultiTtsReturn) {
+            pendingMultiTtsReturn = false
+            val provider = TtsProviderRegistry.discover(this).firstOrNull {
+                it.packageName.equals("org.nobody.multitts", ignoreCase = true) ||
+                    it.label.contains("MultiTTS", ignoreCase = true)
+            }
+            if (provider != null) {
+                activateTtsProvider(provider)
+                if (::status.isInitialized) status.text = "已连接 MultiTTS。正在读取其实际可用音色…"
+            } else if (::status.isInitialized) {
+                status.text = "尚未发现 MultiTTS 系统语音服务。请确认语音包已导入，并在手机“文字转语音输出”中启用 MultiTTS。"
+            }
         }
-        if (provider != null) {
-            activateTtsProvider(provider)
-            if (::status.isInitialized) status.text = "已连接 MultiTTS。正在读取其实际可用音色…"
-        } else if (::status.isInitialized) {
-            status.text = "尚未发现 MultiTTS 系统语音服务。请确认语音包已导入，并在手机“文字转语音输出”中启用 MultiTTS。"
-        }
+        // Rebuild the storage card after returning from Android's permission screen.
+        if (page == 3 && ::body.isInitialized) render()
     }
 
 
@@ -1371,7 +1374,9 @@ class MainActivity : AppCompatActivity() {
 
         val storageCard = card()
         storageCard.addView(section("本地存储", "模型文件、生成作品和应用剩余可用空间。"))
+        val publicAccess = ModelCatalog.hasPublicModelStorageAccess()
         val modelDir = ModelCatalog.modelsDirectory(this)
+        val publicTarget = ModelCatalog.publicModelsDirectory()
         val storageInfo = label("正在统计手机内的模型与作品文件…", 12, p.secondary).apply {
             setPadding(dp(2), dp(5), dp(2), dp(5))
             isClickable = true
@@ -1384,13 +1389,32 @@ class MainActivity : AppCompatActivity() {
             Toast.makeText(this, "模型路径已复制", Toast.LENGTH_SHORT).show()
         }
         storageCard.addView(storageInfo, marginTop(5))
+        if (!publicAccess && android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
+            storageCard.addView(label(
+                "当前模型目录位于应用专属空间，部分文件管理器无法直接浏览。开启下方权限后，新模型将保存到手机 Download/Yovoice/models，可在文件管理器中直接找到。",
+                12, p.secondary
+            ), marginTop(8))
+            storageCard.addView(secondaryButton("设置公开模型存储权限") {
+                try {
+                    val settingsIntent = Intent(
+                        android.provider.Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
+                        Uri.parse("package:" + packageName)
+                    )
+                    startActivity(settingsIntent)
+                } catch (_: Exception) {
+                    startActivity(Intent(android.provider.Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION))
+                }
+            }, marginTop(8))
+        } else {
+            storageCard.addView(label("公开目录已启用：手机文件管理器 → Download → Yovoice → models", 12, p.secondary), marginTop(8))
+        }
         storageExecutor.execute {
             val modelBytes = directoryBytes(modelDir)
             val projectBytes = generatedStorageBytes()
             val freeBytes = runCatching { android.os.StatFs(modelDir.absolutePath).availableBytes }.getOrDefault(0L)
             runOnUiThread {
                 if (!destroyed && !isFinishing && !isDestroyed) {
-                    storageInfo.text = "模型：${formatStorage(modelBytes)} · 作品：${formatStorage(projectBytes)}\n应用可用空间：${formatStorage(freeBytes)}\n模型目录（点击复制）：\n${modelDir.absolutePath}"
+                    storageInfo.text = "模型：${formatStorage(modelBytes)} · 作品：${formatStorage(projectBytes)}\n模型存储可用空间：${formatStorage(freeBytes)}\n模型目录（点击复制）：\n${modelDir.absolutePath}"
                 }
             }
         }
