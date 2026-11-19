@@ -2788,21 +2788,27 @@ class MainActivity : AppCompatActivity() {
         releasePlayer()
         try {
             player = MediaPlayer().apply {
-                setOnPreparedListener {
-                    if (destroyed) it.release() else {
+                setOnPreparedListener { prepared ->
+                    if (destroyed || player !== prepared) {
+                        runCatching { prepared.release() }
+                    } else {
                         showPlayerMiniWindow()
-                        it.start()
+                        prepared.start()
                         playerPaused = false
                         playerPauseAction?.text = "暂停"
                     }
                 }
-                setOnCompletionListener {
-                    releasePlayer()
-                    if (::status.isInitialized) status.text = "音频播放完成"
+                setOnCompletionListener { completed ->
+                    if (player === completed) {
+                        releasePlayer()
+                        if (::status.isInitialized) status.text = "音频播放完成"
+                    }
                 }
-                setOnErrorListener { _, _, _ ->
-                    releasePlayer()
-                    Toast.makeText(this@MainActivity, "音频格式暂不支持", Toast.LENGTH_SHORT).show()
+                setOnErrorListener { failed, _, _ ->
+                    if (player === failed) {
+                        releasePlayer()
+                        Toast.makeText(this@MainActivity, "音频格式暂不支持", Toast.LENGTH_SHORT).show()
+                    }
                     true
                 }
                 setDataSource(this@MainActivity, uri)
