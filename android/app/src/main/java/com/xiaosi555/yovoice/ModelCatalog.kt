@@ -206,8 +206,12 @@ object ModelCatalog {
             for (legacy in legacyLocations) {
                 if (!legacy.isDirectory) continue
                 val migrated = runCatching {
-                    legacy.renameTo(installed) ||
-                        legacy.copyRecursively(installed, overwrite = false).isDirectory
+                    if (legacy.renameTo(installed)) {
+                        true
+                    } else {
+                        legacy.copyRecursively(installed, overwrite = false)
+                        installed.isDirectory
+                    }
                 }.getOrDefault(false)
                 if (migrated) {
                     legacy.deleteRecursively()
