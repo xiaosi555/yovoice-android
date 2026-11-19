@@ -49,11 +49,15 @@ data class ModelEntry(
 
     /** Compare package layout, while allowing a previously verified catalog revision. */
     fun matchesManifestPaths(manifestFiles: org.json.JSONArray): Boolean = runCatching {
-        val expected = packageFiles().map { localRelativePath(it.path).replace('\\', '/') }.toSet()
-        val actual = (0 until manifestFiles.length()).map {
-            localRelativePath(manifestFiles.getJSONObject(it).getString("remotePath")).replace('\\', '/')
+        val expectedRemote = packageFiles().map { it.path.replace('\\', '/') }.toSet()
+        val expectedLocal = packageFiles().map { localRelativePath(it.path).replace('\\', '/') }.toSet()
+        val actualRemote = (0 until manifestFiles.length()).map {
+            manifestFiles.getJSONObject(it).getString("remotePath").replace('\\', '/')
         }.toSet()
-        expected.isNotEmpty() && actual == expected
+        val actualLocal = (0 until manifestFiles.length()).map {
+            manifestFiles.getJSONObject(it).getString("localPath").replace('\\', '/')
+        }.toSet()
+        expectedRemote.isNotEmpty() && actualRemote == expectedRemote && actualLocal == expectedLocal
     }.getOrDefault(false)
 
     fun fileUrl(file: ModelAssetFile, source: String, catalogRevision: String): String {
