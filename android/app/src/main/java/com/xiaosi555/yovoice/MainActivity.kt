@@ -2786,13 +2786,31 @@ class MainActivity : AppCompatActivity() {
                 language != TextToSpeech.LANG_MISSING_DATA &&
                 language != TextToSpeech.LANG_NOT_SUPPORTED &&
                 language != TextToSpeech.ERROR
+            val shouldPersist = persistTtsProviderOnInit
+            persistTtsProviderOnInit = false
+            // If a newly selected provider cannot initialize Chinese, fall back to the
+            // Android system default when it is a different service. Keep the previous
+            // saved preference untouched until a Chinese-capable provider is confirmed.
+            if (!chineseReady && shouldPersist) {
+                val defaultPackage = runCatching {
+                    android.provider.Settings.Secure.getString(contentResolver, "tts_default_synth")
+                }.getOrNull()
+                val fallback = TtsProviderRegistry.discover(this).firstOrNull {
+                    it.packageName == defaultPackage && it.packageName != activeTtsEngineId
+                }
+                if (fallback != null) {
+                    if (::status.isInitialized) status.text = activeTtsEngineLabel +
+                        " 不支持中文或初始化失败，正在切回系统默认语音引擎…"
+                    activateTtsProvider(fallback, persist = false)
+                    return@runOnUiThread
+                }
+            }
             // Do not remember an engine as the preferred Chinese voice provider unless
             // it actually accepts the Chinese locale, not merely its service connection.
-            if (chineseReady && persistTtsProviderOnInit) {
+            if (chineseReady && shouldPersist) {
                 getSharedPreferences("yovoice-tts", MODE_PRIVATE).edit()
                     .putString("selected_tts_engine_id", activeTtsEngineId).apply()
             }
-            persistTtsProviderOnInit = false
             val message = when {
                 !ttsReady -> activeTtsEngineLabel + " 初始化失败，请检查该语音服务。"
                 language == TextToSpeech.LANG_MISSING_DATA || language == TextToSpeech.LANG_NOT_SUPPORTED || language == TextToSpeech.ERROR ->
