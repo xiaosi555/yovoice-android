@@ -1806,6 +1806,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private var ttsGeneration = 0
+    private var persistTtsProviderOnInit = false
     private var activeTtsEngineId = ""
     private var activeTtsEngineLabel = "正在发现语音引擎…"
 
@@ -1862,10 +1863,9 @@ class MainActivity : AppCompatActivity() {
         if (::pitchLabel.isInitialized) pitchLabel.text = "音调 %.1f×".format(speechPitch)
         if (::speedSeekBar.isInitialized) speedSeekBar.progress = (speechRate * 10).toInt().coerceIn(1, 30)
         if (::pitchSeekBar.isInitialized) pitchSeekBar.progress = (speechPitch * 10).toInt().coerceIn(1, 30)
-        if (persist) {
-            getSharedPreferences("yovoice-tts", MODE_PRIVATE).edit()
-                .putString("selected_tts_engine_id", provider.packageName).apply()
-        }
+        // Persist only after Android confirms that this engine initialized successfully.
+        // A broken provider must not replace the last known working engine preference.
+        persistTtsProviderOnInit = persist
         if (::enginePicker.isInitialized) enginePicker.text = provider.label + " · 正在连接   ›"
         if (::status.isInitialized) status.text = "正在初始化 " + provider.label + "…"
         tts = try {
@@ -2779,6 +2779,11 @@ class MainActivity : AppCompatActivity() {
         runOnUiThread {
             if (destroyed || isFinishing || isDestroyed || token != ttsGeneration) return@runOnUiThread
             ttsReady = result == TextToSpeech.SUCCESS && tts != null
+            if (ttsReady && persistTtsProviderOnInit) {
+                getSharedPreferences("yovoice-tts", MODE_PRIVATE).edit()
+                    .putString("selected_tts_engine_id", activeTtsEngineId).apply()
+            }
+            persistTtsProviderOnInit = false
             val language = if (ttsReady) runCatching {
                 tts?.setLanguage(Locale.SIMPLIFIED_CHINESE) ?: TextToSpeech.ERROR
             }.getOrDefault(TextToSpeech.ERROR) else TextToSpeech.ERROR
