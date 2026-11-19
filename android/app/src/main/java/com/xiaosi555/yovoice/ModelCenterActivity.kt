@@ -376,7 +376,7 @@ class ModelCenterActivity : AppCompatActivity() {
         }, params().apply { topMargin = dp(2) })
 
         val status = TextView(this).apply {
-            val engineSupportsFamily = runtimeReady && model.family in runtimeFamilies
+            val engineSupportsFamily = runtimeReady && model.nativeFamily() in runtimeFamilies
             text = "正在检查本地模型文件及 SHA-256…"
             textSize = 12f
             setTextColor(accentColor)
@@ -384,7 +384,7 @@ class ModelCenterActivity : AppCompatActivity() {
         }
         card.addView(status, params())
 
-        val runtimeSupported = runtimeReady && model.family in runtimeFamilies
+        val runtimeSupported = runtimeReady && model.nativeFamily() in runtimeFamilies
         val downloadable = model.isDownloadable() && runtimeSupported
         val uniqueName = "model-download-${model.id}"
         var state: WorkInfo.State? = null
@@ -425,7 +425,7 @@ class ModelCenterActivity : AppCompatActivity() {
             val canCancel = downloading
             updateIconAction(downloadAction, downloadIcon, if (probingSource) "正在测速下载源…" else downloadDescription,
                 !installed && !probingSource && (downloadable || canCancel))
-            val canUse = installed && runtimeReady && model.family in runtimeFamilies &&
+            val canUse = installed && runtimeReady && model.nativeFamily() in runtimeFamilies &&
                 ModelFeatureGuide.features.any { model.family in it.modelFamilies }
             updateIconAction(useAction, "play",
                 if (canUse) "进入对应功能并使用此模型" else "当前模型尚不能在此设备运行",
@@ -455,7 +455,7 @@ class ModelCenterActivity : AppCompatActivity() {
                     } else "等待下载任务启动…"
                 }
                 WorkInfo.State.SUCCEEDED -> {
-                    status.text = if (installed && runtimeReady && model.family in runtimeFamilies) {
+                    status.text = if (installed && runtimeReady && model.nativeFamily() in runtimeFamilies) {
                         "已下载并通过 SHA-256 校验 · 本机引擎支持此模型家族，仍需实际任务验证"
                     } else if (installed) {
                         "已下载并通过校验 · 当前 Android 引擎未编入此模型家族，暂不能本机推理"
@@ -463,7 +463,7 @@ class ModelCenterActivity : AppCompatActivity() {
                 }
                 WorkInfo.State.CANCELLED -> status.text = "下载已暂停；已完成的文件和断点会保留"
                 WorkInfo.State.FAILED -> status.text = "下载失败：${info.outputData.getString("error") ?: "可点击重试"}"
-                else -> status.text = if (installed && runtimeReady && model.family in runtimeFamilies) {
+                else -> status.text = if (installed && runtimeReady && model.nativeFamily() in runtimeFamilies) {
                     "已下载并通过 SHA-256 校验 · 本机引擎支持此模型家族，仍需实际任务验证"
                 } else if (installed) {
                     "已下载并通过校验 · 当前 Android 引擎未编入此模型家族，暂不能本机推理"
@@ -542,7 +542,7 @@ class ModelCenterActivity : AppCompatActivity() {
             }
         }
         useAction.setOnClickListener {
-            if (!installed || !runtimeReady || model.family !in runtimeFamilies) {
+            if (!installed || !runtimeReady || model.nativeFamily() !in runtimeFamilies) {
                 Toast.makeText(this, "此模型尚未满足本机运行条件", Toast.LENGTH_LONG).show()
                 return@setOnClickListener
             }
