@@ -253,7 +253,7 @@ Java_com_xiaosi555_yovoice_NativeEngine_nativeLoadModel(
     };
     audiocpp_options* options = audiocpp_options_create();
     if (options != nullptr) {
-        audiocpp_options_set(options, "mem_saver", "true");
+        audiocpp_options_set(options, "audio8_tts.mem_saver", "true");
         if (task_value == "asr" && auxiliary.get()[0] != '\0') {
             audiocpp_options_set(options, "qwen3_asr.forced_aligner_path", auxiliary.get());
         }
