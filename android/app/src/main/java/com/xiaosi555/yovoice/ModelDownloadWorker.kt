@@ -55,7 +55,7 @@ class ModelDownloadWorker(
         val total = files.sumOf { it.size }
         require(total > 0L) { "模型文件大小无效" }
 
-        val modelsRoot = File(applicationContext.filesDir, "models")
+        val modelsRoot = ModelCatalog.modelsDirectory(applicationContext)
         if (!modelsRoot.exists() && !modelsRoot.mkdirs()) throw IOException("无法创建模型目录")
         val staging = File(modelsRoot, ".${model.id}.staging")
         val installed = ModelCatalog.installedDirectory(applicationContext, model.id)
