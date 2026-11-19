@@ -913,7 +913,7 @@ class MainActivity : AppCompatActivity() {
         val allFeatureModels = ModelCatalog.load(this)
             .filter { it.family in feature.modelFamilies }
             .sortedBy { it.packageSize() }
-        val compatibleModels = allFeatureModels.filter { it.family in runtimeFamilies }
+        val compatibleModels = allFeatureModels.filter { it.nativeFamily() in runtimeFamilies }
         // Show every model mapped to this creation feature. Runtime support is a separate state, never a silent filter.
         val content = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -938,7 +938,7 @@ class MainActivity : AppCompatActivity() {
         if (allFeatureModels.isEmpty()) content.addView(label("模型目录中暂时没有关联到此功能的模型。", 13, p.secondary), marginTop(12))
         val manager = WorkManager.getInstance(applicationContext)
         allFeatureModels.forEach { model ->
-            val supported = runtimeReady && model.family in runtimeFamilies
+            val supported = runtimeReady && model.nativeFamily() in runtimeFamilies
             val selectedNow = getSharedPreferences("yovoice-model-selection", MODE_PRIVATE).getString(featureId, null) == model.id
             val item = LinearLayout(this).apply {
                 orientation = LinearLayout.VERTICAL
@@ -996,15 +996,15 @@ class MainActivity : AppCompatActivity() {
                     action.isEnabled = supported
                 } else {
                     state.text = when (info?.state) {
-                        WorkInfo.State.FAILED -> "下载失败：" + (info?.outputData?.getString("error") ?: "可重试")
-                        WorkInfo.State.CANCELLED -> "下载已暂停，可继续"
-                        else -> if (supported) "尚未下载 · 可直接在此下载" else "运行时未适配 · 可下载保存，但不能在此设备推理"
+                        WorkInfo.State.FAILED -> if (supported) "下载失败：" + (info?.outputData?.getString("error") ?: "可重试") else "当前 APK 未编入此模型家族，无法加载"
+                        WorkInfo.State.CANCELLED -> if (supported) "下载已暂停，可继续" else "当前 APK 未编入此模型家族，无法使用"
+                        else -> if (supported) "尚未下载 · 可直接在此下载" else "当前 APK 未编入此模型家族；下载后也不能使用"
                     }
-                    action.text = when (info?.state) {
+                    action.text = if (supported) when (info?.state) {
                         WorkInfo.State.FAILED, WorkInfo.State.CANCELLED -> "重试下载"
                         else -> "下载"
-                    }
-                    action.isEnabled = model.isDownloadable()
+                    } else "未适配"
+                    action.isEnabled = model.isDownloadable() && supported
                 }
             }
             action.setOnClickListener {
@@ -1033,6 +1033,10 @@ class MainActivity : AppCompatActivity() {
                     dialog.dismiss()
                     render()
                 } else {
+                    if (!supported) {
+                        Toast.makeText(this@MainActivity, "此模型家族未编入当前 APK，不能下载后使用。", Toast.LENGTH_LONG).show()
+                        return@setOnClickListener
+                    }
                     val request = OneTimeWorkRequestBuilder<ModelDownloadWorker>()
                         .setInputData(workDataOf(ModelDownloadWorker.KEY_MODEL_ID to model.id, ModelDownloadWorker.KEY_SOURCE to "huggingface"))
                         .setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build())
@@ -1767,7 +1771,7 @@ class MainActivity : AppCompatActivity() {
                 check(modelFile.isFile && modelFile.length() > 0L) { "模型主文件不存在或为空" }
 
                 runOnUiThread { if (!destroyed && ::status.isInitialized) status.text = "正在加载本地 Audio8 模型（首次加载可能较久）…" }
-                val loaded = JSONObject(NativeEngine.loadModel(modelFile.absolutePath, model.family, nativeThreads()))
+                val loaded = JSONObject(NativeEngine.loadModel(modelFile.absolutePath, model.nativeFamily(), nativeThreads()))
                 check(loaded.optBoolean("ok")) { loaded.optString("error", "模型加载失败") }
                 markNativeModelInUse(model)
 
@@ -2246,7 +2250,7 @@ class MainActivity : AppCompatActivity() {
                 val alignerFile = File(modelRoot, model.localRelativePath(alignerAsset.path))
                 check(alignerFile.isFile) { "强制对齐器文件不存在，请重新下载完整 ASR 模型包" }
                 val loaded = JSONObject(NativeEngine.loadTaskModel(
-                    modelFile.absolutePath, model.family, "asr", "offline", threads = nativeThreads(), auxiliaryPath = alignerFile.absolutePath
+                    modelFile.absolutePath, model.nativeFamily(), "asr", "offline", threads = nativeThreads(), auxiliaryPath = alignerFile.absolutePath
                 ))
                 check(loaded.optBoolean("ok")) { loaded.optString("error", "ASR 模型加载失败") }
                 markNativeModelInUse(model)
@@ -2343,7 +2347,7 @@ class MainActivity : AppCompatActivity() {
                 val modelRoot = ModelCatalog.installedDirectory(this, model.id)
                 val modelFile = File(modelRoot, model.localRelativePath(model.remotePath))
                 check(modelFile.isFile) { "Audio8 TTS 模型文件不存在，请重新下载" }
-                val loaded = JSONObject(NativeEngine.loadTaskModel(modelFile.absolutePath, model.family, "clon", "offline", threads = nativeThreads()))
+                val loaded = JSONObject(NativeEngine.loadTaskModel(modelFile.absolutePath, model.nativeFamily(), "clon", "offline", threads = nativeThreads()))
                 check(loaded.optBoolean("ok")) { loaded.optString("error", "声音克隆模型加载失败") }
                 markNativeModelInUse(model)
                 runOnUiThread {
@@ -2419,7 +2423,7 @@ class MainActivity : AppCompatActivity() {
                 check(ModelCatalog.isInstalled(this, model)) { "请先下载 Stable Audio 3 Small Music Q8 模型（约 1.68 GB）" }
                 val modelFile = File(ModelCatalog.installedDirectory(this, model.id), model.localRelativePath(model.remotePath))
                 check(modelFile.isFile) { "音乐模型文件不存在，请重新下载" }
-                val loaded = JSONObject(NativeEngine.loadTaskModel(modelFile.absolutePath, model.family, "gen", "offline", threads = nativeThreads()))
+                val loaded = JSONObject(NativeEngine.loadTaskModel(modelFile.absolutePath, model.nativeFamily(), "gen", "offline", threads = nativeThreads()))
                 check(loaded.optBoolean("ok")) { loaded.optString("error", "音乐模型加载失败") }
                 markNativeModelInUse(model)
                 runOnUiThread { if (!destroyed && !isFinishing) musicStatusView?.text = "模型已加载，正在生成音乐…" }
@@ -2472,7 +2476,7 @@ class MainActivity : AppCompatActivity() {
                 val pcm = AndroidAudioDecoder.decodeToPcm(this, uri, 44_100, 2, 180)
                 val modelFile = File(ModelCatalog.installedDirectory(this, model.id), model.localRelativePath(model.remotePath))
                 check(modelFile.isFile) { "六轨模型文件不存在，请重新下载" }
-                val loaded = JSONObject(NativeEngine.loadTaskModel(modelFile.absolutePath, model.family, "sep", "offline", threads = nativeThreads()))
+                val loaded = JSONObject(NativeEngine.loadTaskModel(modelFile.absolutePath, model.nativeFamily(), "sep", "offline", threads = nativeThreads()))
                 check(loaded.optBoolean("ok")) { loaded.optString("error", "音轨分离模型加载失败") }
                 markNativeModelInUse(model)
                 runOnUiThread { if (!destroyed && !isFinishing) stemStatusView?.text = "模型已加载，正在分离六条音轨…" }
@@ -2532,7 +2536,7 @@ class MainActivity : AppCompatActivity() {
                 val pcm = AndroidAudioDecoder.decodeToPcm(this, uri, 44_100, 2, 180)
                 val modelFile = File(ModelCatalog.installedDirectory(this, model.id), model.localRelativePath(model.remotePath))
                 check(modelFile.isFile) { "MuScriptor 模型文件不存在，请重新下载" }
-                val loaded = JSONObject(NativeEngine.loadTaskModel(modelFile.absolutePath, model.family, "midi", "offline", threads = nativeThreads()))
+                val loaded = JSONObject(NativeEngine.loadTaskModel(modelFile.absolutePath, model.nativeFamily(), "midi", "offline", threads = nativeThreads()))
                 check(loaded.optBoolean("ok")) { loaded.optString("error", "MIDI 模型加载失败") }
                 markNativeModelInUse(model)
                 runOnUiThread { if (!destroyed && !isFinishing) midiStatusView?.text = "模型已加载，正在提取音符事件…" }
@@ -2736,7 +2740,7 @@ class MainActivity : AppCompatActivity() {
                 val root = ModelCatalog.installedDirectory(this, model.id)
                 val modelFile = File(root, model.localRelativePath(model.remotePath))
                 check(modelFile.isFile) { "Audio8 TTS 模型文件不存在" }
-                val loaded = JSONObject(NativeEngine.loadTaskModel(modelFile.absolutePath, model.family, "clon", "offline", threads = nativeThreads()))
+                val loaded = JSONObject(NativeEngine.loadTaskModel(modelFile.absolutePath, model.nativeFamily(), "clon", "offline", threads = nativeThreads()))
                 check(loaded.optBoolean("ok")) { loaded.optString("error", "故事配音模型加载失败") }
                 markNativeModelInUse(model)
                 val pcmA = if (lines.any { it.speaker == roleAName }) AndroidAudioDecoder.decodeTo16kMono(this, roleAUri!!, 30) else null
