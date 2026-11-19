@@ -594,11 +594,7 @@ class ModelCenterActivity : AppCompatActivity() {
     }
 
     private fun iconActionButton(icon: String, description: String): FrameLayout = FrameLayout(this).apply {
-        background = GradientDrawable().apply {
-            setColor(surface)
-            cornerRadius = dp(14).toFloat()
-            setStroke(dp(1), 0x33808080)
-        }
+        background = android.graphics.drawable.ColorDrawable(android.graphics.Color.TRANSPARENT)
         isClickable = true
         isFocusable = true
         contentDescription = description
