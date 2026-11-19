@@ -422,7 +422,9 @@ class ModelCenterActivity : AppCompatActivity() {
                 state == WorkInfo.State.CANCELLED -> "继续下载"
                 else -> "下载模型"
             }
-            updateIconAction(downloadAction, downloadIcon, if (probingSource) "正在测速下载源…" else downloadDescription, downloadable && !installed && !probingSource)
+            val canCancel = downloading
+            updateIconAction(downloadAction, downloadIcon, if (probingSource) "正在测速下载源…" else downloadDescription,
+                !installed && !probingSource && (downloadable || canCancel))
             val canUse = installed && runtimeReady && model.family in runtimeFamilies &&
                 ModelFeatureGuide.features.any { model.family in it.modelFamilies }
             updateIconAction(useAction, "play",
@@ -494,13 +496,17 @@ class ModelCenterActivity : AppCompatActivity() {
         }
 
         downloadAction.setOnClickListener {
-            if (!downloadable || installed || probingSource) return@setOnClickListener
+            if (installed || probingSource) return@setOnClickListener
             when (state) {
                 WorkInfo.State.RUNNING, WorkInfo.State.ENQUEUED, WorkInfo.State.BLOCKED -> {
                     workManager.cancelUniqueWork(uniqueName)
                     Toast.makeText(this, "已请求暂停，保留下载断点", Toast.LENGTH_SHORT).show()
                 }
                 else -> {
+                    if (!downloadable) {
+                        Toast.makeText(this, "此模型家族尚未编入当前 APK，不能下载后使用。", Toast.LENGTH_LONG).show()
+                        return@setOnClickListener
+                    }
                     val selectedSource = when (sourcePicker.selectedItemPosition) {
                         1 -> "huggingface"
                         2 -> "mirror"
