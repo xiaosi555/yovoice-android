@@ -384,7 +384,8 @@ class ModelCenterActivity : AppCompatActivity() {
         }
         card.addView(status, params())
 
-        val downloadable = model.isDownloadable()
+        val runtimeSupported = runtimeReady && model.family in runtimeFamilies
+        val downloadable = model.isDownloadable() && runtimeSupported
         val uniqueName = "model-download-${model.id}"
         var state: WorkInfo.State? = null
         var installed = false
@@ -412,7 +413,9 @@ class ModelCenterActivity : AppCompatActivity() {
                 else -> "download"
             }
             val downloadDescription = when {
-                !downloadable -> "缺少校验信息，不能下载"
+                !model.isDownloadable() -> "缺少 SHA-256 校验信息，不能下载"
+                !runtimeReady -> "原生引擎尚未就绪，暂不能确认兼容性"
+                !runtimeSupported -> "当前 APK 未编入此模型家族，下载后也无法使用"
                 downloading -> "暂停下载"
                 installed -> "模型已下载并校验"
                 state == WorkInfo.State.FAILED -> "重试下载"
@@ -430,8 +433,16 @@ class ModelCenterActivity : AppCompatActivity() {
         fun update(info: WorkInfo?) {
             latestInfo = info
             state = info?.state
-            if (!downloadable) {
-                status.text = "目录缺少完整 SHA-256 校验信息，暂不可安全下载"
+            if (!model.isDownloadable()) {
+                status.text = "模型目录缺少完整 SHA-256 校验信息，暂不可安全下载"
+            } else if (!runtimeReady) {
+                status.text = if (installed) "模型文件已下载并校验，但 Android 原生引擎未就绪；请先检查运行库" else "Android 原生引擎未就绪，暂不能确认模型兼容性"
+            } else if (!runtimeSupported) {
+                status.text = if (installed) {
+                    "文件已下载并通过 SHA-256 校验，但当前 APK 未编入「${model.family}」推理模块，因此不能加载或使用；无需重复下载"
+                } else {
+                    "当前 APK 未编入「${model.family}」推理模块。下载后也无法使用，请选择已适配的模型家族"
+                }
             } else when (info?.state) {
                 WorkInfo.State.RUNNING, WorkInfo.State.ENQUEUED, WorkInfo.State.BLOCKED -> {
                     val done = info.progress.getLong("downloaded", 0L)
