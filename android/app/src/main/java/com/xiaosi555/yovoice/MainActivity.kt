@@ -914,14 +914,14 @@ class MainActivity : AppCompatActivity() {
             .filter { it.family in feature.modelFamilies }
             .sortedBy { it.packageSize() }
         val compatibleModels = allFeatureModels.filter { it.nativeFamily() in runtimeFamilies }
-        // Show every model mapped to this creation feature. Runtime support is a separate state, never a silent filter.
+        // Keep the catalog visible, but disable download/use for families absent from this APK's native registry.
         val content = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(18), dp(8), dp(18), dp(8))
         }
         content.addView(label("本功能适配的模型按体积从小到大排列；每项显示用途和本机运行时状态。下载完成还会逐文件校验 SHA-256。", 12, p.secondary))
         if (!runtimeReady || compatibleModels.isEmpty()) {
-            content.addView(label("当前设备运行时尚未报告此功能的可用模型家族。下列未适配模型仍可下载保存，但不能作为本机可运行模型。", 12, 0xFF9A6428.toInt()).apply {
+            content.addView(label("当前设备运行时尚未报告此功能的可用模型家族。未编入此 APK 的模型会禁用下载，避免占用手机空间。", 12, 0xFF9A6428.toInt()).apply {
                 setPadding(dp(10), dp(8), dp(10), dp(8))
                 background = shape(0x1AFFB74D, dp(10))
             }, marginTop(8))
