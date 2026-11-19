@@ -1,6 +1,8 @@
 package com.xiaosi555.yovoice
 
 import android.content.Context
+import android.os.Build
+import android.os.Environment
 import org.json.JSONObject
 import java.io.File
 import java.util.Locale
@@ -166,10 +168,25 @@ object ModelCatalog {
         return cachedRevision ?: error("模型目录尚未加载")
     }
 
-    /** Publicly discoverable app-specific external storage; falls back to internal storage. */
+    /**
+     * Prefer a normal shared Downloads folder when the user grants all-files access.
+     * Without that optional permission, keep the app usable in app-specific storage.
+     */
+    fun hasPublicModelStorageAccess(): Boolean =
+        Build.VERSION.SDK_INT < Build.VERSION_CODES.R || Environment.isExternalStorageManager()
+
+    fun publicModelsDirectory(): File = File(
+        Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS),
+        "Yovoice/models"
+    )
+
     fun modelsDirectory(context: Context): File {
-        val externalRoot = context.getExternalFilesDir(null)
-        val root = File(externalRoot ?: context.filesDir, "models")
+        val root = if (hasPublicModelStorageAccess()) {
+            publicModelsDirectory()
+        } else {
+            val externalRoot = context.getExternalFilesDir(null)
+            File(externalRoot ?: context.filesDir, "models")
+        }
         if (!root.exists()) root.mkdirs()
         return root
     }
@@ -179,16 +196,25 @@ object ModelCatalog {
         val installed = File(root, id)
         val backup = File(root, ".$id.backup")
         if (!installed.exists() && backup.exists()) backup.renameTo(installed)
-        // Migrate the previous private-internal location once, without overwriting
-        // an already installed external copy.
-        val legacy = File(File(context.filesDir, "models"), id)
-        if (!installed.exists() && legacy.isDirectory) {
-            if (!root.exists()) root.mkdirs()
-            val migrated = runCatching {
-                legacy.renameTo(installed) || legacy.copyRecursively(installed, overwrite = false).isDirectory
-            }.getOrDefault(false)
-            if (migrated) legacy.deleteRecursively()
-            else installed.deleteRecursively()
+        // Migrate older app-private locations into the visible Downloads folder
+        // once public storage access is granted. Keep the source until copy succeeds.
+        val legacyLocations = listOfNotNull(
+            context.getExternalFilesDir(null)?.let { File(File(it, "models"), id) },
+            File(File(context.filesDir, "models"), id)
+        ).distinctBy { it.absolutePath }
+        if (!installed.exists()) {
+            for (legacy in legacyLocations) {
+                if (!legacy.isDirectory) continue
+                val migrated = runCatching {
+                    legacy.renameTo(installed) ||
+                        legacy.copyRecursively(installed, overwrite = false).isDirectory
+                }.getOrDefault(false)
+                if (migrated) {
+                    legacy.deleteRecursively()
+                    break
+                }
+                installed.deleteRecursively()
+            }
         }
         return installed
     }
