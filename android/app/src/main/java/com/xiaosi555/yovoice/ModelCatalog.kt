@@ -178,9 +178,11 @@ object ModelCatalog {
         val legacy = File(File(context.filesDir, "models"), id)
         if (!installed.exists() && legacy.isDirectory) {
             if (!root.exists()) root.mkdirs()
-            if (legacy.renameTo(installed)) {
-                File(legacy.parentFile, ".$id.backup").deleteRecursively()
-            }
+            val migrated = runCatching {
+                legacy.renameTo(installed) || legacy.copyRecursively(installed, overwrite = false).isDirectory
+            }.getOrDefault(false)
+            if (migrated) legacy.deleteRecursively()
+            else installed.deleteRecursively()
         }
         return installed
     }
