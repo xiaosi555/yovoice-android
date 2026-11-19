@@ -406,8 +406,8 @@ class ModelCenterActivity : AppCompatActivity() {
             val downloading = state == WorkInfo.State.RUNNING ||
                 state == WorkInfo.State.ENQUEUED || state == WorkInfo.State.BLOCKED
             val downloadIcon = when {
-                !downloadable -> "close"
                 downloading -> "pause"
+                !downloadable -> "close"
                 installed -> "check"
                 state == WorkInfo.State.FAILED -> "refresh"
                 else -> "download"
