@@ -101,11 +101,55 @@ class ModelDownloadWorker(
             if (target.exists() && !target.delete()) throw IOException("无法清理旧模型文件")
 
             val part = File(target.parentFile, target.name + ".part")
-            downloadFile(model.fileUrl(file, source, ModelCatalog.revision(applicationContext)), part, file.size, completed, total, model.name)
-            if (part.length() != file.size) throw IOException("文件大小校验失败：${file.path}")
-            if (!sha256(part).equals(file.sha256, true)) {
-                part.delete()
-                throw IllegalStateException("SHA-256 校验失败，已删除损坏文件：${file.path}")
+            val revision = ModelCatalog.revision(applicationContext)
+            val candidates = listOf(source, "huggingface", "mirror", "modelscope")
+                .distinct()
+                .map { candidate -> candidate to model.fileUrl(file, candidate, revision) }
+                .distinctBy { it.second }
+            var downloaded = false
+            var lastDownloadError: IOException? = null
+
+            for ((index, candidate) in candidates.withIndex()) {
+                ensureActive()
+                // A partial file is safe to resume only against the same endpoint.
+                // Once switching mirrors, discard it instead of concatenating bytes
+                // that may come from a different CDN/cache representation.
+                if (index > 0 && part.exists() && !part.delete()) {
+                    throw IOException("切换下载源前无法清理断点文件：${file.path}")
+                }
+                try {
+                    downloadFile(
+                        candidate.second,
+                        part,
+                        file.size,
+                        completed,
+                        total,
+                        model.name
+                    )
+                    if (part.length() != file.size) {
+                        throw IOException("文件大小校验失败：${file.path}")
+                    }
+                    if (!sha256(part).equals(file.sha256, true)) {
+                        throw IOException("SHA-256 校验失败：${file.path}")
+                    }
+                    downloaded = true
+                    break
+                } catch (error: kotlinx.coroutines.CancellationException) {
+                    throw error
+                } catch (error: IOException) {
+                    lastDownloadError = error
+                    // Keep the preferred endpoint's partial file only when it is
+                    // the sole unique URL; otherwise the next mirror starts clean.
+                    if (index > 0 || candidates.size > 1) {
+                        if (part.exists() && !part.delete()) {
+                            throw IOException("无法清理失败的镜像临时文件：${file.path}", error)
+                        }
+                    }
+                }
+            }
+
+            if (!downloaded) {
+                throw lastDownloadError ?: IOException("所有下载源均不可用：${file.path}")
             }
             if (!part.renameTo(target)) throw IOException("模型文件写入失败：${file.path}")
             completed += file.size
