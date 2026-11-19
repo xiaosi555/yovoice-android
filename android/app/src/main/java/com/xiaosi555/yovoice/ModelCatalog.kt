@@ -47,21 +47,13 @@ data class ModelEntry(
         it.size > 0L && it.sha256.matches(Regex("[a-fA-F0-9]{64}"))
     }
 
-    /** Match every installed-manifest record to this exact catalog package, in order. */
-    fun matchesManifestFiles(manifestFiles: org.json.JSONArray): Boolean = runCatching {
-        val expectedFiles = packageFiles()
-        if (manifestFiles.length() != expectedFiles.size) return false
-        for (index in expectedFiles.indices) {
-            val expected = expectedFiles[index]
-            val actual = manifestFiles.getJSONObject(index)
-            val expectedLocalPath = localRelativePath(expected.path).replace('\\', '/')
-            val actualLocalPath = actual.getString("localPath").replace('\\', '/')
-            if (actual.getString("remotePath") != expected.path) return false
-            if (actualLocalPath != expectedLocalPath) return false
-            if (actual.getLong("size") != expected.size) return false
-            if (!actual.optString("sha256").equals(expected.sha256, ignoreCase = true)) return false
-        }
-        true
+    /** Compare package layout, while allowing a previously verified catalog revision. */
+    fun matchesManifestPaths(manifestFiles: org.json.JSONArray): Boolean = runCatching {
+        val expected = packageFiles().map { localRelativePath(it.path).replace('\\', '/') }.toSet()
+        val actual = (0 until manifestFiles.length()).map {
+            localRelativePath(manifestFiles.getJSONObject(it).getString("remotePath")).replace('\\', '/')
+        }.toSet()
+        expected.isNotEmpty() && actual == expected
     }.getOrDefault(false)
 
     fun fileUrl(file: ModelAssetFile, source: String, catalogRevision: String): String {
@@ -164,12 +156,28 @@ object ModelCatalog {
         return cachedRevision ?: error("模型目录尚未加载")
     }
 
+    /** Publicly discoverable app-specific external storage; falls back to internal storage. */
+    fun modelsDirectory(context: Context): File {
+        val externalRoot = context.getExternalFilesDir(null)
+        val root = File(externalRoot ?: context.filesDir, "models")
+        if (!root.exists()) root.mkdirs()
+        return root
+    }
+
     fun installedDirectory(context: Context, id: String): File {
-        val root = File(context.filesDir, "models")
+        val root = modelsDirectory(context)
         val installed = File(root, id)
         val backup = File(root, ".$id.backup")
-        // 上次安装若在目录切换中被系统终止，优先恢复上一份完整模型。
         if (!installed.exists() && backup.exists()) backup.renameTo(installed)
+        // Migrate the previous private-internal location once, without overwriting
+        // an already installed external copy.
+        val legacy = File(File(context.filesDir, "models"), id)
+        if (!installed.exists() && legacy.isDirectory) {
+            if (!root.exists()) root.mkdirs()
+            if (legacy.renameTo(installed)) {
+                File(legacy.parentFile, ".$id.backup").deleteRecursively()
+            }
+        }
         return installed
     }
 
@@ -196,10 +204,11 @@ object ModelCatalog {
             if (!data.optBoolean("verified", false)) return false
             if (data.optString("version") != model.version) return false
             val files = data.getJSONArray("files")
-            if (!model.matchesManifestFiles(files)) return false
+            if (!model.matchesManifestPaths(files)) return false
             val expectedMain = model.localRelativePath(model.remotePath).replace('\\', '/')
             if (data.optString("mainFile") != expectedMain) return false
             val rootCanonical = root.canonicalFile
+            var mainFound = false
             for (i in 0 until files.length()) {
                 val entry = files.getJSONObject(i)
                 val normalized = entry.getString("localPath").replace('\\', '/')
@@ -210,8 +219,9 @@ object ModelCatalog {
                 val expectedHash = entry.optString("sha256", "")
                 if (!expectedHash.matches(Regex("[a-fA-F0-9]{64}"))) return false
                 if (!sha256(file).equals(expectedHash, ignoreCase = true)) return false
+                if (normalized == expectedMain) mainFound = true
             }
-            true
+            mainFound
         }.getOrDefault(false)
     }
 }
