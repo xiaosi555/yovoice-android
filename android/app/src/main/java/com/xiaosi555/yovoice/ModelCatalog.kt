@@ -35,6 +35,12 @@ data class ModelEntry(
     fun packageFiles(): List<ModelAssetFile> =
         files.ifEmpty { listOf(ModelAssetFile(remotePath, size, sha256, null, null)) }
 
+    /** Catalog naming may be more specific than the native loader family name. */
+    fun nativeFamily(): String = when (family) {
+        "htdemucs_6stems" -> "htdemucs"
+        else -> family
+    }
+
     fun localRelativePath(path: String): String {
         val prefix = stripPrefix?.trim('/')?.takeIf { it.isNotEmpty() } ?: return path
         return if (path.startsWith("$prefix/")) path.removePrefix("$prefix/") else path
