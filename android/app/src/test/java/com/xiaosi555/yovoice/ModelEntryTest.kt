@@ -113,6 +113,34 @@ class ModelEntryTest {
         assertEquals("2.00 GB", ModelEntry.formatBytes(2_147_483_648L))
     }
     @Test
+    fun verifiedManifestFromOlderCatalogRevisionKeepsItsInstallationStatus() {
+        val entry = model()
+        val olderVerifiedManifest = org.json.JSONArray().put(
+            org.json.JSONObject()
+                .put("remotePath", "voices/test model.gguf")
+                .put("localPath", "voices/test model.gguf")
+                .put("size", 96L)
+                .put("sha256", "b".repeat(64))
+        )
+        // The actual file is checked against this manifest's recorded hash/size by
+        // ModelCatalog.isInstalled; catalog metadata may legitimately have advanced.
+        assertTrue(entry.matchesManifestPaths(olderVerifiedManifest))
+    }
+
+    @Test
+    fun installedManifestRejectsDifferentPackagePaths() {
+        val entry = model()
+        val wrongPackage = org.json.JSONArray().put(
+            org.json.JSONObject()
+                .put("remotePath", "other.gguf")
+                .put("localPath", "other.gguf")
+                .put("size", 100L)
+                .put("sha256", "a".repeat(64))
+        )
+        assertEquals(false, entry.matchesManifestPaths(wrongPackage))
+    }
+
+    @Test
     fun installedManifestMustMatchEveryCatalogFileExactly() {
         val single = model()
         val validSingle = org.json.JSONArray().put(
