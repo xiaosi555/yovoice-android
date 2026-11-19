@@ -510,7 +510,7 @@ class MainActivity : AppCompatActivity() {
                     }
                 }
                 val iconWrap = FrameLayout(this@MainActivity).apply {
-                    background = shape(Color.argb(if (p.dark) 38 else 22, Color.red(p.accent), Color.green(p.accent), Color.blue(p.accent)), dp(17))
+                    setBackgroundColor(Color.TRANSPARENT)
                     addView(LineIconView(this@MainActivity, featureIcon(feature.id), p.accent), FrameLayout.LayoutParams(dp(30), dp(30), Gravity.CENTER))
                 }
                 addView(iconWrap, LinearLayout.LayoutParams(dp(48), dp(48)))
