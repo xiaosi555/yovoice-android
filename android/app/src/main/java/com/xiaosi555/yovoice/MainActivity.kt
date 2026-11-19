@@ -2779,14 +2779,20 @@ class MainActivity : AppCompatActivity() {
         runOnUiThread {
             if (destroyed || isFinishing || isDestroyed || token != ttsGeneration) return@runOnUiThread
             ttsReady = result == TextToSpeech.SUCCESS && tts != null
-            if (ttsReady && persistTtsProviderOnInit) {
+            val language = if (ttsReady) runCatching {
+                tts?.setLanguage(Locale.SIMPLIFIED_CHINESE) ?: TextToSpeech.ERROR
+            }.getOrDefault(TextToSpeech.ERROR) else TextToSpeech.ERROR
+            val chineseReady = ttsReady &&
+                language != TextToSpeech.LANG_MISSING_DATA &&
+                language != TextToSpeech.LANG_NOT_SUPPORTED &&
+                language != TextToSpeech.ERROR
+            // Do not remember an engine as the preferred Chinese voice provider unless
+            // it actually accepts the Chinese locale, not merely its service connection.
+            if (chineseReady && persistTtsProviderOnInit) {
                 getSharedPreferences("yovoice-tts", MODE_PRIVATE).edit()
                     .putString("selected_tts_engine_id", activeTtsEngineId).apply()
             }
             persistTtsProviderOnInit = false
-            val language = if (ttsReady) runCatching {
-                tts?.setLanguage(Locale.SIMPLIFIED_CHINESE) ?: TextToSpeech.ERROR
-            }.getOrDefault(TextToSpeech.ERROR) else TextToSpeech.ERROR
             val message = when {
                 !ttsReady -> activeTtsEngineLabel + " 初始化失败，请检查该语音服务。"
                 language == TextToSpeech.LANG_MISSING_DATA || language == TextToSpeech.LANG_NOT_SUPPORTED || language == TextToSpeech.ERROR ->
