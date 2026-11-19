@@ -182,7 +182,7 @@ class ModelCenterActivity : AppCompatActivity() {
         root.addView(sourcePicker, params())
 
         val runtimeExplanation = if (runtimeReady) {
-            "当前原生引擎支持的模型家族：${runtimeFamilies.joinToString().ifBlank { "暂无" }}。其他模型可以下载保存，但尚不能在本机推理。下载前请确认存储空间；模型能否运行还取决于设备内存和实际任务测试。"
+            "当前原生引擎注册的模型家族：${runtimeFamilies.joinToString().ifBlank { "暂无" }}。未编入当前 APK 的模型会标注未适配并禁用下载，避免下载后无法使用。可运行性仍取决于设备内存和实际任务测试。"
         } else {
             "当前 Android 原生推理引擎尚未成功初始化。模型下载仍会执行文件校验，但引擎可用前不能进行本地推理。"
         }
