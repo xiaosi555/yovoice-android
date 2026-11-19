@@ -361,7 +361,12 @@ class MainActivity : AppCompatActivity() {
         }
         panel.addView(enginePicker, LinearLayout.LayoutParams(-1, dp(48)).apply { topMargin = dp(10) })
 
-        panel.addView(label("音色", 13, p.secondary, true), marginTop(12))
+        val voiceLabel = label("音色", 13, p.secondary, true).apply {
+            isClickable = true
+            isFocusable = true
+            setOnClickListener { showVoiceSearchDialog() }
+        }
+        panel.addView(voiceLabel, marginTop(12))
         voicePicker = TextView(this).apply {
             text = "搜索并选择音色"
             textSize = 14f
