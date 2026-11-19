@@ -1378,7 +1378,7 @@ class MainActivity : AppCompatActivity() {
         storageExecutor.execute {
             val modelBytes = directoryBytes(modelDir)
             val projectBytes = generatedStorageBytes()
-            val freeBytes = runCatching { android.os.StatFs(filesDir.absolutePath).availableBytes }.getOrDefault(0L)
+            val freeBytes = runCatching { android.os.StatFs(modelDir.absolutePath).availableBytes }.getOrDefault(0L)
             runOnUiThread {
                 if (!destroyed && !isFinishing && !isDestroyed) {
                     storageInfo.text = "模型：${formatStorage(modelBytes)} · 作品：${formatStorage(projectBytes)}\n应用可用空间：${formatStorage(freeBytes)}\n模型目录（点击复制）：\n${modelDir.absolutePath}"
